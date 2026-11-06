@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "D:\\Antiquarian's Cage\\backend\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--app-dir", "D:\\Antiquarian's Cage\\backend", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "D:\\Antiquarian's Cage\\backend",
+      "port": 8000
+    },
+    {
+      "name": "console",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "D:\\Antiquarian's Cage\\frontend"],
+      "cwd": "D:\\Antiquarian's Cage\\frontend",
+      "port": 5173
+    }
+  ]
+}

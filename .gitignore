@@ -1,0 +1,17 @@
+.env
+backend/.env
+**/.venv/
+**/__pycache__/
+*.pyc
+backend/var/
+*.db
+frontend/node_modules/
+frontend/dist/
+infrastructure/nginx/certs/*
+!infrastructure/nginx/certs/.gitkeep
+.pytest_cache/
+agent/var/
+agent/build/
+agent/dist/
+frontend/test-results/
+frontend/playwright-report/

@@ -1,0 +1,18 @@
+# Never send secrets, keys, local data or build output to the Docker daemon.
+**/.env
+**/.env.*
+!**/.env.example
+**/var/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/*.db
+**/node_modules/
+**/dist/
+**/test-results/
+**/playwright-report/
+infrastructure/nginx/certs/
+agent/
+documentation/
+.git/

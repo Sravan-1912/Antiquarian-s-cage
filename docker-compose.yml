@@ -1,0 +1,75 @@
+# Antiquarian's Cage — local/staging stack. Secrets come from .env (copy .env.example and run
+# infrastructure/scripts/generate_secrets.py). Production should use a secret manager and real certificates.
+name: antiquarians-cage
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: antiquarians_cage
+      POSTGRES_USER: cage_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres-init.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cage_owner -d antiquarians_cage"]
+      interval: 5s
+      retries: 10
+    networks: [backend]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    volumes: [redisdata:/data]
+    networks: [backend]
+
+  migrate:
+    build: { context: ./backend, dockerfile: ../infrastructure/docker/backend.Dockerfile }
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      # Migrations run as the schema owner; the API runs as the least-privilege cage_app role.
+      DATABASE_URL: postgresql+psycopg://cage_owner:${POSTGRES_PASSWORD}@postgres:5432/antiquarians_cage
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY}
+      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      SMTP_HOST: ${SMTP_HOST:-}
+    depends_on: { postgres: { condition: service_healthy } }
+    networks: [backend]
+
+  api:
+    build: { context: ./backend, dockerfile: ../infrastructure/docker/backend.Dockerfile }
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://cage_app:${APP_DB_PASSWORD}@postgres:5432/antiquarians_cage
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      TRUST_PROXY_HEADERS: "true"
+    volumes:
+      # Device CA + signing keys: losing this volume invalidates every enrolled agent. Back it up.
+      - cagekeys:/app/var
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_started }
+    networks: [backend]
+
+  web:
+    build: { context: ., dockerfile: infrastructure/docker/frontend.Dockerfile }
+    restart: unless-stopped
+    ports: ["443:443", "80:80", "8443:8443"]   # 8443 = agent channel (mTLS)
+    volumes:
+      - ./infrastructure/nginx/certs:/etc/nginx/certs:ro
+    depends_on: [api]
+    networks: [backend]
+
+volumes:
+  pgdata:
+  cagekeys:
+  redisdata:
+
+networks:
+  backend:
