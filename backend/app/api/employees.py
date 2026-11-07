@@ -18,7 +18,7 @@ from app.core.database import utcnow
 from app.models import ApplicationAssignment, Employee, EmployeeEvent, User, UserRole, WebAuthnCredential
 from app.schemas.admin import EmployeeCreate, EmployeeEventOut, EmployeeOut, EmployeeUpdate, LifecycleRequest
 from app.schemas.common import Page
-from app.services import audit, auth, notifications
+from app.services import audit, auth, notifications, tenancy
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -28,7 +28,7 @@ SORTABLE = {"full_name": Employee.full_name, "department": Employee.department, 
 
 def _get(db: Session, ctx: AuthContext, emp_id: uuid.UUID) -> Employee:
     e = db.get(Employee, emp_id)
-    if e is None or e.organization_id != ctx.user.organization_id:
+    if e is None or e.organization_id != ctx.user.organization_id or not tenancy.can_see(ctx, e.owner_admin_id):
         raise HTTPException(404, "Employee not found")
     return e
 
@@ -41,7 +41,8 @@ def _email_taken(db: Session, org_id: uuid.UUID, email_addr: str, exclude: uuid.
 
 
 def _filtered(ctx: AuthContext, q: str | None, status: str | None, department: str | None):
-    stmt = select(Employee).where(Employee.organization_id == ctx.user.organization_id)
+    stmt = tenancy.restrict(select(Employee).where(Employee.organization_id == ctx.user.organization_id),
+                            Employee.owner_admin_id, ctx)
     if q:
         like = f"%{q.lower()}%"
         stmt = stmt.where(or_(func.lower(Employee.full_name).like(like), func.lower(Employee.email).like(like),
@@ -75,7 +76,8 @@ def list_employees(
 
 @router.get("/departments", response_model=list[str])
 def departments(ctx: AuthContext = Depends(require_permission("employees:read")), db: Session = Depends(get_db)):
-    return db.scalars(select(Employee.department).where(Employee.organization_id == ctx.user.organization_id)
+    return db.scalars(tenancy.restrict(select(Employee.department).where(Employee.organization_id == ctx.user.organization_id),
+                                       Employee.owner_admin_id, ctx)
                       .distinct().order_by(Employee.department)).all()
 
 
@@ -119,7 +121,8 @@ def create_employee(body: EmployeeCreate, ctx: AuthContext = Depends(require_per
         raise HTTPException(409, "Employee ID is already in use")
     if body.manager_id:
         _get(db, ctx, body.manager_id)
-    emp = Employee(organization_id=org_id, **body.model_dump(exclude={"email"}), email=str(body.email).lower())
+    emp = Employee(organization_id=org_id, owner_admin_id=tenancy.owner_for(ctx),
+                   **body.model_dump(exclude={"email"}), email=str(body.email).lower())
     db.add(emp)
     db.flush()
     db.add(EmployeeEvent(employee_id=emp.id, kind="joiner", actor_id=ctx.user.id,
@@ -209,6 +212,18 @@ def _transition(db: Session, ctx: AuthContext, emp: Employee, *, allowed_from: s
             for c in creds:
                 c.revoked_at, c.revoked_by = now, ctx.user.id
             details["passkeys_revoked"] = len(creds)
+            from app.models import PhoneAuthenticator
+            phones = db.scalars(select(PhoneAuthenticator).where(PhoneAuthenticator.user_id == user.id,
+                                                                 PhoneAuthenticator.revoked_at.is_(None))).all()
+            for ph in phones:
+                ph.revoked_at = now
+            details["phones_removed"] = len(phones)
+            from app.models import WindowsUnlockKey
+            keys = db.scalars(select(WindowsUnlockKey).where(WindowsUnlockKey.user_id == user.id,
+                                                             WindowsUnlockKey.status != "revoked")).all()
+            for k in keys:
+                k.status, k.revoked_at = "revoked", now
+            details["windows_unlock_removed"] = len(keys)
     details = {"from": before, "to": to, "reason": reason, "sessions_revoked": revoked, **details}
     db.add(EmployeeEvent(employee_id=emp.id, kind=kind, actor_id=ctx.user.id, details=details))
     audit.record(db, emp.organization_id, ctx.actor, action, target_type="employee", target_id=emp.id,

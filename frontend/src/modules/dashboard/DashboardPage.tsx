@@ -8,6 +8,7 @@ import { Alert, Badge, Button, Card, CardHeader, EmptyState, PageHeader, Spinner
 import { api, describeError } from '@/services/api'
 import type { ComplianceDash, DashboardSummary, EndpointSummary, ModuleStatus, PolicyDash } from '@/types/api'
 import { formatDateTime, humanizeAction, relativeTime } from '@/utils/format'
+import { FleetOverview, HealthChip } from './FleetOverview'
 
 const GRID = '#202327'
 const AXIS = { stroke: '#5f646b', fontSize: 11, tickLine: false, axisLine: false } as const
@@ -231,9 +232,12 @@ export function DashboardPage() {
 
   return (
     <div className="animate-fade-in space-y-5">
-      <PageHeader title="Operations overview" description={`Live figures computed from the database · updated ${formatDateTime(d.generated_at)}`}
-        actions={<Button variant="outline" size="sm" onClick={() => q.refetch()} loading={q.isFetching}><RefreshCw />Refresh</Button>} />
+      <PageHeader title="Overview" description={`Your entire console at a glance · live figures, updated ${formatDateTime(d.generated_at)}`}
+        actions={<><HealthChip d={d} /><Button variant="outline" size="sm" onClick={() => q.refetch()} loading={q.isFetching}><RefreshCw />Refresh</Button></>} />
 
+      <FleetOverview d={d} />
+
+      <h2 className="pt-2 text-lg font-semibold text-silver-50">Workforce and identity</h2>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi label="Active employees" value={d.employees.active} icon={Users} />
         <Kpi label="Suspended employees" value={d.employees.suspended} icon={UserMinus} tone={d.employees.suspended ? 'warn' : undefined} />

@@ -3,9 +3,11 @@
 Endpoint management and workforce security platform: employee identity, Windows endpoint
 administration (agent), security policy & compliance, and tamper-evident security operations.
 
-> **Status: Phases 1–6 implemented** (foundation, endpoint management, security policies + compliance, remote
-> administration, identity security, security operations). Phase 7 (hardening and deployment) is next. What has actually been verified is in
-> `documentation/test-log.md`.
+> **Status: Phases 1–9 implemented** (foundation, endpoint management, security policies + compliance, remote
+> administration, identity security, security operations, hardening, phone-approval sign-in with the Cage
+> Authenticator Android app, fleet overview with real network usage). Phase 10 (Windows sign-in approved from the phone) is built and tested
+> off the lock screen; it still has to be verified on a Windows 10/11 test VM (`documentation/12-windows-phone-unlock.md`). What has actually been verified is in
+> `documentation/test-log.md`; operating procedures are in `documentation/10-operations-runbook.md`.
 
 ## Repository layout
 
@@ -97,6 +99,25 @@ Details: `documentation/08-identity-and-sso.md`. A sample relying party for test
 
 Details: `documentation/09-security-operations.md`.
 
+## Phase 7 features (hardening)
+
+| Area | What works |
+|---|---|
+| Audit anchoring | Signed chain heads (Ed25519) in an append-only table + external file; detects tail truncation and rewrites; critical alert; offline verifier |
+| Performance | Constant query count on every list/summary/report endpoint (scaling test with 310 devices) |
+| E2E | Playwright suite (Edge) on an isolated stack: `cd frontend && npm run e2e` |
+| Backup/restore | `infrastructure/scripts/cage_backup.py backup|restore|drill` — encrypted, checksummed, drill verifies chain + anchors |
+| Production | Startup guards, `python -m app.preflight`, offline key creation, persistent key/anchor volumes, `.dockerignore` |
+| Docs | Runbook (`documentation/10-operations-runbook.md`), OpenAPI (`documentation/api/openapi.json`) |
+
+## Phases 8–9 (implemented)
+
+| Area | What works |
+|---|---|
+| Phone sign-in | "Sign in with your phone": number matching + fingerprint/face-bound key signature, decoys for unknown emails, alerts on denial — `documentation/11-phone-sign-in-and-fleet-overview.md` |
+| Cage Authenticator | Expo/React Native app in `mobile/`; signed Android APK built locally (`mobile/build-android.ps1`); iOS project config ready, `.ipa` needs a Mac/EAS |
+| Fleet overview | Health chip, users/devices/policies cards, platform and last-contact rings, network usage from agent byte counters |
+
 ## Local development
 
 Prerequisites: Python 3.13+ (3.14 tested), Node 22+ (26 tested), **PostgreSQL 16** (or SQLite for a quick look).
@@ -143,7 +164,7 @@ The API connects as the least-privilege `cage_app` role; migrations run as `cage
 
 * PostgreSQL 16.15 installed locally; dev DB `antiquarians_cage` and test DB `cage_test`, schema owned by
   `cage_owner`, API running as least-privilege `cage_app` (INSERT/SELECT only on `audit_logs`).
-* Backend: **60/60 pytest tests pass on PostgreSQL** (migrations as owner, API as `cage_app`), including the
+* Backend: **78/78 pytest tests pass on PostgreSQL** (Phase 7: anchoring, scaling, production guards) (migrations as owner, API as `cage_app`), including the
   append-only audit trigger test. Also passes on SQLite.
 * Frontend: typecheck, 4 Vitest tests and production build pass.
 * Agent: 39 pytest tests pass (validator, broker core, named pipe, registry rollback, remote actions, assistance
@@ -156,7 +177,7 @@ The API connects as the least-privilege `cage_app` role; migrations run as `cage
   audit/users/employee-create and 200 for permitted reads; denials appear in the audit log; chain verifies.
 * **Not yet verified:** policy changes applied by an *elevated* broker, broker/agent as Windows services /
   virtual service account, mTLS through Nginx, Docker Compose
-  stack, Playwright E2E suite, Redis-backed rate limiting, real SMTP delivery, Windows 10/Pro/domain-joined devices.
+  stack, Redis-backed rate limiting, real SMTP delivery, Windows 10/Pro/domain-joined devices.
 
 Run the suite against PostgreSQL:
 

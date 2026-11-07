@@ -6,6 +6,7 @@ import { Alert, Badge, Button, Card, CardHeader, Field, Input, PageHeader, Spinn
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
 import { describePasskeyError, passkeysSupported, registerPasskey } from '@/services/passkeys'
+import { PhoneCard } from './PhoneCard'
 import type { AuthEvent, SessionItem } from '@/types/api'
 import { describeUserAgent, formatDateTime } from '@/utils/format'
 
@@ -212,6 +213,7 @@ export function AccountSecurityPage() {
   return (
     <div className="animate-fade-in space-y-4">
       <PageHeader title="Security settings" description="Manage how you sign in." />
+      <PhoneCard />
       <PasskeysCard />
       <MfaCard />
       <PasswordCard />

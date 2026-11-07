@@ -29,8 +29,12 @@ Each record stores `hash = SHA-256(prev_hash ‖ canonical(record))` and `mac = 
 
 * Detects modification, insertion or deletion **within** the chain. Without the HMAC key an attacker with DB write
   access cannot recompute a valid chain.
-* **Does not** detect truncation of the newest records on its own. Mitigation: periodically export the verified head
-  (`seq`, `hash`) to an external write-once store (planned Phase 7) and compare.
+* Truncation of the newest records and wholesale re-chaining are detected by **anchors** (Phase 7): the chain head is
+  signed with a dedicated Ed25519 key hourly and on demand, stored append-only in `audit_anchors` and appended to an
+  external file (`AUDIT_ANCHOR_DIR`). Verification compares every anchor with the live chain; the scheduler re-checks
+  the latest anchor every cycle and raises a critical alert. The external file is only as strong as its storage: put
+  it on WORM/remote storage the API host cannot rewrite. A failed external write raises an alert (never silent).
+  `infrastructure/scripts/verify_audit_anchors.py` verifies the file offline with the public key.
 * An attacker who holds both DB write access **and** `AUDIT_HMAC_KEY` can forge history. Keep the key in a secret
   manager/HSM, separate from the database host and from `DATA_ENCRYPTION_KEY`; rotate with a documented re-anchor.
 * SQLite (development only) has no trigger protection.
@@ -103,9 +107,23 @@ Each record stores `hash = SHA-256(prev_hash ‖ canonical(record))` and `mac = 
 * User-session helper launch when the agent runs as a service (remote assistance currently fails closed there).
 * Compliance evidence is endpoint-reported; no hardware-backed attestation yet.
 * Agent binary signing and secure self-update — not implemented (build script notes signtool requirement).
-* WebAuthn/passkeys and OIDC provider (Phase 5) — not implemented.
-* "Recent MFA" step-up for sensitive actions, PostgreSQL row-level security, key rotation tooling (Phase 7).
+* "Recent MFA" step-up for sensitive actions, PostgreSQL row-level security, key rotation tooling.
+* Agent subprocesses use absolute System32 paths (GetSystemDirectoryW) to prevent binary planting (Phase 7 audit).
 * Locked accounts return HTTP 423, which reveals that the account exists; accepted trade-off for operator clarity.
+
+## Phase 7 security review (2026-11-06)
+
+* Dependency audit: `pip-audit` (backend, agent) and `npm audit --omit=dev` — no known vulnerabilities.
+* Bandit (backend, agent, broker): remaining findings are accepted — subprocess use in the agent (allowlisted tools,
+  absolute paths, no shell), retry jitter using `random`, two false-positive "hardcoded password" strings.
+  Security-relevant `assert`s were replaced with explicit checks (asserts vanish under `python -O`).
+* Secrets scan: none committed; real values only in gitignored `backend/.env` and `backend/var/`. `.dockerignore`
+  keeps `.env`, keys and local data out of image build contexts.
+* Production guards refuse: insecure cookies, missing Redis/SMTP, short CA passphrase, mTLS off, non-https base URL or
+  origins, SQLite, the API connecting as the schema owner, identical data/audit keys. `python -m app.preflight`
+  checks the live deployment (role privileges, triggers, migrations, keys, anchor storage, Redis, SMTP).
+* Backups are AES-256-GCM encrypted (scrypt-derived key), checksummed per member, and restore only into a new
+  database; a wrong passphrase or a modified bundle is refused.
 
 ## Reporting
 

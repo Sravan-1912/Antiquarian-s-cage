@@ -163,8 +163,13 @@ def test_investigation_workflow_and_rbac(client, outbox):
     for email, role in (("sa@example.com", "security_analyst"), ("ad@example.com", "admin")):
         client.post("/api/v1/users", json={"email": email, "full_name": "Some Body", "role": role}, headers=csrf(client))
         client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+    # Enrol the device under the admin so the resulting alert belongs to the admin's tenant (admin isolation).
+    login(client, "ad@example.com")
+    tok = _token(client)["token"]
+    client.post("/api/v1/auth/logout", headers=csrf(client))
+    login(client, "root@example.com")
     agent = FakeAgent(client)
-    agent.enroll(_token(client)["token"])
+    agent.enroll(tok)
     agent.signed("/agent/v1/inventory", {**INVENTORY, "security": {**SEC, "firewall": {"state": "disabled"}}})
     alert = [a for a in _alerts(client) if a["rule_key"] == "firewall_disabled"][0]
     analysts = client.get("/api/v1/alerts/analysts").json()

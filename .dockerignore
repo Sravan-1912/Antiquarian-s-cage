@@ -16,3 +16,5 @@ infrastructure/nginx/certs/
 agent/
 documentation/
 .git/
+**/.e2e-state/
+mobile/

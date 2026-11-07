@@ -52,11 +52,12 @@ def _normalise_token(raw: str) -> str:
 
 # ------------------------------------------------------------------------------------------------ tokens
 def create_enrollment_token(db: Session, org_id: uuid.UUID, actor: Actor, *, label: str,
-                            employee_id: uuid.UUID | None, minutes: int) -> tuple[EnrollmentToken, str]:
+                            employee_id: uuid.UUID | None, minutes: int,
+                            owner_admin_id: uuid.UUID | None = None) -> tuple[EnrollmentToken, str]:
     minutes = min(minutes, get_settings().enrollment_token_max_minutes)
     raw = pki.new_enrollment_secret()
     tok = EnrollmentToken(organization_id=org_id, token_hash=hash_token(_normalise_token(raw)), label=label,
-                          employee_id=employee_id, created_by=actor.user_id,
+                          employee_id=employee_id, created_by=actor.user_id, owner_admin_id=owner_admin_id,
                           expires_at=utcnow() + timedelta(minutes=minutes))
     db.add(tok)
     db.flush()
@@ -83,8 +84,17 @@ def enroll(db: Session, req: EnrollRequest, source_ip: str | None) -> tuple[Devi
     if tok is None or token_state(tok) != "active":
         raise DeviceError("Enrollment token is invalid, expired or already used", 401)
 
+    from app.services import subscriptions
+    try:
+        subscriptions.check_can_enroll(db, tok.organization_id, tok.owner_admin_id)
+    except subscriptions.QuotaExceeded as exc:
+        raise DeviceError(
+            f"Device quota reached for this subscription ({exc.used}/{exc.limit} endpoints enrolled). "
+            "Remove an endpoint or upgrade the plan before enrolling another.", 402) from exc
+
     device = Device(
-        organization_id=tok.organization_id, employee_id=tok.employee_id, display_name=req.hostname,
+        organization_id=tok.organization_id, employee_id=tok.employee_id, owner_admin_id=tok.owner_admin_id,
+        display_name=req.hostname,
         hostname=req.hostname, agent_version=req.agent_version, status="active", last_seen_ip=source_ip,
         os_name=req.os.name if req.os else None, os_version=req.os.version if req.os else None,
         os_build=req.os.build if req.os else None, reported_ip_addresses={}, reported_mac_addresses={},
@@ -175,7 +185,8 @@ def record_heartbeat(db: Session, device: Device, cert: DeviceCertificate, req: 
         _event(db, device, "agent_version_changed", {"from": device.agent_version, "to": req.agent_version})
         device.agent_version = req.agent_version
     db.add(DeviceHeartbeat(device_id=device.id, received_at=now, source_ip=source_ip,
-                           agent_version=req.agent_version, uptime_seconds=req.uptime_seconds))
+                           agent_version=req.agent_version, uptime_seconds=req.uptime_seconds,
+                           net_bytes_sent=req.net_bytes_sent, net_bytes_recv=req.net_bytes_recv))
     if was == "offline":
         _event(db, device, "came_online", {"source_ip": source_ip})
     db.flush()
@@ -330,3 +341,35 @@ def purge_old_heartbeats(db: Session) -> int:
     n = db.execute(delete(DeviceHeartbeat).where(DeviceHeartbeat.received_at < cutoff)).rowcount or 0
     db.commit()
     return n
+
+
+def network_usage(db: Session, org_id: uuid.UUID, hours: int = 24, device_id: uuid.UUID | None = None,
+                  owner_admin_id: uuid.UUID | None = None) -> dict:
+    """Bytes sent/received in the window, from the agent's cumulative counters: the sum of increases between
+    consecutive heartbeats per device. A counter that goes down (reboot, adapter reset) restarts from zero, so its
+    new value counts as traffic since the reset. The first heartbeat in the window only sets the baseline."""
+    from sqlalchemy import func as f
+    since = utcnow() - timedelta(hours=hours)
+    hb = DeviceHeartbeat
+    q = (select(hb.device_id, hb.net_bytes_sent, hb.net_bytes_recv,
+                f.lag(hb.net_bytes_sent).over(partition_by=hb.device_id, order_by=hb.received_at).label("ps"),
+                f.lag(hb.net_bytes_recv).over(partition_by=hb.device_id, order_by=hb.received_at).label("pr"))
+         .join(Device, Device.id == hb.device_id)
+         .where(Device.organization_id == org_id, hb.received_at >= since, hb.net_bytes_sent.is_not(None)))
+    if device_id:
+        q = q.where(hb.device_id == device_id)
+    if owner_admin_id is not None:  # admin isolation
+        q = q.where(Device.owner_admin_id == owner_admin_id)
+    per: dict[uuid.UUID, list[int]] = {}
+    for dev, sent, recv, ps, pr in db.execute(q):
+        if ps is None or pr is None:
+            continue  # first reading in the window: a baseline, not a measurement
+        acc = per.setdefault(dev, [0, 0])
+        acc[0] += sent - ps if sent >= ps else sent
+        acc[1] += recv - pr if recv >= pr else recv
+    sent = sum(v[0] for v in per.values())
+    recv = sum(v[1] for v in per.values())
+    n = len(per)
+    return {"window_hours": hours, "devices_reporting": n, "bytes_sent": sent, "bytes_received": recv,
+            "avg_sent": sent // n if n else None, "avg_received": recv // n if n else None,
+            "per_device": {str(k): {"sent": v[0], "received": v[1]} for k, v in per.items()}}
