@@ -154,11 +154,11 @@ export interface DashboardSummary {
     locked_accounts: number
     logins_by_day: { date: string; success: number; failure: number }[]
   }
-  administrators: { total: number; active: number; mfa_enabled: number }
+  administrators: { total: number; active: number; mfa_enabled: number; online: number }
   endpoints: ModuleStatus | EndpointSummary
   compliance: ModuleStatus | ComplianceDash
   policies: ModuleStatus | PolicyDash
-  alerts: ModuleStatus
+  alerts: ModuleStatus | AlertDash
   recent_activity: { id: string; action: string; actor: string; target: string | null; result: string; created_at: string }[]
   recent_activity_visible: boolean
 }
@@ -235,6 +235,26 @@ export interface EndpointSummary {
   enrollments_by_day: { date: string; count: number }[]
   compliance_states: Record<string, number>
   offline_threshold_seconds: number
+  last_contact: { online: number; under_1h: number; '1h_24h': number; '1d_7d': number; over_7d: number; never: number }
+  platforms: { platform: string; count: number }[]
+  network: NetworkUsage
+}
+
+export interface NetworkUsage {
+  window_hours: number
+  devices_reporting: number
+  bytes_sent: number
+  bytes_received: number
+  avg_sent: number | null
+  avg_received: number | null
+}
+
+export interface AlertDash {
+  available: true
+  open_by_severity: Record<'critical' | 'high' | 'medium' | 'low' | 'informational', number>
+  open_total: number
+  unassigned: number
+  detected_by_day: { date: string; count: number }[]
 }
 
 export type PolicyCategory = 'firewall' | 'bitlocker' | 'usb' | 'antivirus' | 'screen_lock' | 'windows_update' | 'password'
@@ -297,7 +317,7 @@ export interface DeviceCompliance {
   history: { evaluated_at: string; score: number; state: string }[]
 }
 export interface ComplianceDash { available: true; compliant: number; non_compliant: number; unknown: number; trend: { date: string; average_score: number | null; non_compliant: number }[] }
-export interface PolicyDash { available: true; active_policies: number; pending: number; by_status: Partial<Record<DeploymentStatus, number>>; success_rate: number | null }
+export interface PolicyDash { available: true; active_policies: number; total_policies: number; inactive_policies: number; pending: number; by_status: Partial<Record<DeploymentStatus, number>>; success_rate: number | null }
 
 export type RemoteCommand = 'device.inspect' | 'device.lock' | 'device.restart' | 'device.restart_cancel' | 'account.disable' | 'account.enable' | 'account.remove_admin'
 export interface RemoteAction {

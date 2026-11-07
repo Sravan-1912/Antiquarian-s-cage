@@ -30,6 +30,12 @@
   SAML not implemented.
 * **Phase 6 — implemented**; alert detection, email outbox delivery and reports verified live on real endpoint data.
   The agent-silence alert and the heartbeat-retention purge (previously deferred) now run in the scheduler.
+* **Phase 7 — complete** for everything verifiable on this machine: security review, audit anchoring, N+1 fixes
+  with a scaling test, Playwright E2E, encrypted backup + restore drill, production guards + preflight, runbook,
+  OpenAPI export. Not verifiable here: Docker stack, Nginx mTLS, Redis, SMTP (see `10-operations-runbook.md`).
+* **Next (agreed 2026-11-06):** Phase 8 phone-approval sign-in with an Android app (fingerprint/face; iOS project
+  written, `.ipa` needs a Mac or Apple account); Phase 9 real network-usage collection and dashboard redesign;
+  Phase 10 Windows sign-in approved from the phone (credential provider).
 * (Historical note) Deferred to Phase 6 by design: an alert/notification when an agent *stops* reporting (offline is already computed
   and shown; the alerting rule engine does not exist yet) and the scheduled heartbeat-retention purge job
   (`services.devices.purge_old_heartbeats` exists, the Celery schedule does not).

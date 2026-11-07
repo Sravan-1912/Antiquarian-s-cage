@@ -17,7 +17,7 @@ from app.models import (
     PolicyAssignment, PolicyDeployment, PolicyRevision,
 )
 from app.schemas import policies as s
-from app.services import audit, compliance, policies
+from app.services import audit, compliance, policies, tenancy
 from app.services.policies import PolicyError
 
 router = APIRouter(tags=["security"])
@@ -36,7 +36,7 @@ def _validation(exc: ValidationError):
 
 def _policy(db: Session, ctx: AuthContext, pid: uuid.UUID) -> EndpointPolicy:
     p = db.get(EndpointPolicy, pid)
-    if p is None or p.organization_id != ctx.user.organization_id:
+    if p is None or p.organization_id != ctx.user.organization_id or not tenancy.can_see(ctx, p.owner_admin_id):
         raise HTTPException(404, "Policy not found")
     return p
 
@@ -66,7 +66,8 @@ def policy_schemas(ctx: AuthContext = Depends(READ)):
 @router.get("/policies", response_model=list[s.PolicyOut])
 def list_policies(category: s.Category | None = None, include_retired: bool = False,
                   ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
-    q = select(EndpointPolicy).where(EndpointPolicy.organization_id == ctx.user.organization_id)
+    q = tenancy.restrict(select(EndpointPolicy).where(EndpointPolicy.organization_id == ctx.user.organization_id),
+                         EndpointPolicy.owner_admin_id, ctx)
     if category:
         q = q.where(EndpointPolicy.category == category)
     if not include_retired:
@@ -79,7 +80,7 @@ def create_policy(body: s.PolicyCreate, ctx: AuthContext = Depends(WRITE), db: S
     try:
         p = policies.create_policy(db, ctx.user.organization_id, ctx.actor, name=body.name.strip(),
                                    description=body.description.strip(), category=body.category,
-                                   configuration=body.configuration)
+                                   configuration=body.configuration, owner_admin_id=tenancy.owner_for(ctx))
     except ValidationError as exc:
         _validation(exc)
     except PolicyError as e:
@@ -221,7 +222,8 @@ def update_check(key: str, body: s.ComplianceSettingUpdate, ctx: AuthContext = D
 
 
 def _managed(ctx: AuthContext):
-    return (Device.organization_id == ctx.user.organization_id, Device.status.in_(("active", "suspended")))
+    own = (Device.owner_admin_id == tenancy.scope_admin_id(ctx),) if tenancy.scope_admin_id(ctx) is not None else ()
+    return (Device.organization_id == ctx.user.organization_id, Device.status.in_(("active", "suspended")), *own)
 
 
 @router.get("/compliance/summary")
@@ -229,16 +231,17 @@ def compliance_summary(ctx: AuthContext = Depends(COMPLIANCE), db: Session = Dep
     org = ctx.user.organization_id
     states = dict(db.execute(select(Device.compliance_state, func.count()).where(*_managed(ctx))
                              .group_by(Device.compliance_state)).all())
-    devices = db.scalars(select(Device).where(*_managed(ctx))).all()
-    latest = [e for e in (compliance.latest_evaluation(db, d.id) for d in devices) if e]
+    devices = db.scalars(select(Device.id).where(*_managed(ctx))).all()
+    latest = list(compliance.latest_evaluations(db, list(devices)).values())
     failing: dict[str, int] = {}
     unknown: dict[str, int] = {}
-    for e in latest:
-        for r in db.scalars(select(ComplianceResult).where(ComplianceResult.evaluation_id == e.id)):
-            if r.result == "FAIL":
-                failing[r.check_key] = failing.get(r.check_key, 0) + 1
-            elif r.result == "UNKNOWN":
-                unknown[r.check_key] = unknown.get(r.check_key, 0) + 1
+    if latest:
+        counts = db.execute(select(ComplianceResult.check_key, ComplianceResult.result, func.count())
+                            .where(ComplianceResult.evaluation_id.in_([e.id for e in latest]),
+                                   ComplianceResult.result.in_(("FAIL", "UNKNOWN")))
+                            .group_by(ComplianceResult.check_key, ComplianceResult.result)).all()
+        for key, result, n in counts:
+            (failing if result == "FAIL" else unknown)[key] = n
     names = {c.key: c.name for c in compliance.catalogue()}
     return {
         "devices": len(devices),
@@ -257,8 +260,10 @@ def compliance_summary(ctx: AuthContext = Depends(COMPLIANCE), db: Session = Dep
 @router.get("/compliance/devices")
 def compliance_devices(ctx: AuthContext = Depends(COMPLIANCE), db: Session = Depends(get_db)):
     out = []
-    for d in db.scalars(select(Device).where(*_managed(ctx)).order_by(Device.hostname)):
-        e = compliance.latest_evaluation(db, d.id)
+    devices = db.scalars(select(Device).where(*_managed(ctx)).order_by(Device.hostname)).all()
+    latest = compliance.latest_evaluations(db, [d.id for d in devices])
+    for d in devices:
+        e = latest.get(d.id)
         out.append({"device_id": str(d.id), "name": d.display_name, "state": d.compliance_state,
                     "score": e.score if e else None, "failed": e.failed if e else None,
                     "unknown": e.unknown if e else None, "evaluated_at": e.evaluated_at if e else None})

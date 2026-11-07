@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { KeyRound } from 'lucide-react'
+import { KeyRound, Smartphone } from 'lucide-react'
+import { PhoneApproval } from './PhoneSignIn'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AuthLayout } from '@/layouts/AuthLayout'
@@ -24,6 +25,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [pkBusy, setPkBusy] = useState(false)
+  const [phoneMode, setPhoneMode] = useState(false)
   const setup = useQuery({ queryKey: ['bootstrap'], queryFn: () => api.get<{ needs_setup: boolean }>('/auth/bootstrap-status') })
 
   useEffect(() => {  // already signed in and returning to an application (no step-up needed) → continue the SSO flow
@@ -68,6 +70,18 @@ export function LoginPage() {
   }
 
   const subtitle = appName ? `to continue to ${appName}` : 'Antiquarian\'s Cage console and workspace'
+  if (phoneMode) {
+    return (
+      <AuthLayout title="Sign in with your phone" subtitle={subtitle}>
+        <PhoneApproval email={email} onApproved={() => void done()} onCancel={() => setPhoneMode(false)} />
+      </AuthLayout>
+    )
+  }
+  function phone() {
+    setError(null)
+    if (!/^\S+@\S+\.\S+$/.test(email)) { setError('Enter your work email first, then choose “Sign in with your phone”.'); return }
+    setPhoneMode(true)
+  }
   return (
     <AuthLayout title="Sign in" subtitle={subtitle}
       footer={<Link to="/forgot-password" className="text-emerald-400 hover:text-emerald-300">Forgot your password?</Link>}>
@@ -89,6 +103,7 @@ export function LoginPage() {
           </Field>
           <Button type="submit" className="w-full" variant={stepUp ? 'secondary' : 'primary'} loading={busy}>Sign in with password</Button>
         </form>
+        <Button type="button" variant="outline" className="w-full" onClick={phone}><Smartphone />Sign in with your phone</Button>
       </div>
     </AuthLayout>
   )

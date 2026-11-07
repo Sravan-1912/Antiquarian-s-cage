@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import AuthContext, current_context, require_permission
 from app.core.database import get_db, utcnow
 from app.models import AlertEvent, Device, Organization, SecurityAlert, User
-from app.services import alerts, audit, notifications, reports
+from app.services import alerts, audit, notifications, reports, tenancy
 
 router = APIRouter(tags=["secops"])
 READ = require_permission("alerts:read")
@@ -27,9 +27,9 @@ TRANSITIONS = {"new": {"triaging", "investigating", "resolved", "false_positive"
                "resolved": {"investigating"}, "false_positive": {"investigating"}}
 
 
-def _out(db: Session, a: SecurityAlert) -> dict:
-    d = db.get(Device, a.device_id) if a.device_id else None
-    u = db.get(User, a.assigned_to) if a.assigned_to else None
+def _out(db: Session, a: SecurityAlert, devs: dict | None = None, users: dict | None = None) -> dict:
+    d = (devs.get(a.device_id) if devs is not None else db.get(Device, a.device_id)) if a.device_id else None
+    u = (users.get(a.assigned_to) if users is not None else db.get(User, a.assigned_to)) if a.assigned_to else None
     return {"id": str(a.id), "rule_key": a.rule_key, "rule_name": alerts.RULES.get(a.rule_key, {}).get("name"),
             "kind": a.kind, "title": a.title, "description": a.description, "severity": a.severity,
             "status": a.status, "device_id": str(a.device_id) if a.device_id else None,
@@ -43,7 +43,7 @@ def _out(db: Session, a: SecurityAlert) -> dict:
 
 def _get(db: Session, ctx: AuthContext, aid: uuid.UUID) -> SecurityAlert:
     a = db.get(SecurityAlert, aid)
-    if a is None or a.organization_id != ctx.user.organization_id:
+    if a is None or a.organization_id != ctx.user.organization_id or not tenancy.can_see(ctx, a.owner_admin_id):
         raise HTTPException(404, "Alert not found")
     return a
 
@@ -57,7 +57,8 @@ def list_alerts(status: Literal["open", "closed", "new", "triaging", "investigat
                 q: str | None = Query(None, max_length=100), page: int = Query(1, ge=1),
                 page_size: int = Query(50, ge=1, le=200), ctx: AuthContext = Depends(READ),
                 db: Session = Depends(get_db)):
-    stmt = select(SecurityAlert).where(SecurityAlert.organization_id == ctx.user.organization_id)
+    stmt = tenancy.restrict(select(SecurityAlert).where(SecurityAlert.organization_id == ctx.user.organization_id),
+                            SecurityAlert.owner_admin_id, ctx)
     if status == "open":
         stmt = stmt.where(SecurityAlert.status.in_(alerts.OPEN))
     elif status == "closed":
@@ -77,26 +78,32 @@ def list_alerts(status: Literal["open", "closed", "new", "triaging", "investigat
     if q:
         stmt = stmt.where(func.lower(SecurityAlert.title).like(f"%{q.lower()}%"))
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    rows = db.scalars(stmt.order_by(SecurityAlert.last_seen_at.desc()).offset((page - 1) * page_size).limit(page_size))
-    return {"items": [_out(db, a) for a in rows], "total": total, "page": page, "page_size": page_size}
+    rows = db.scalars(stmt.order_by(SecurityAlert.last_seen_at.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    # Referenced devices/users in two queries instead of two per alert.
+    dev_ids = {a.device_id for a in rows if a.device_id}
+    user_ids = {a.assigned_to for a in rows if a.assigned_to}
+    devs = {d.id: d for d in db.scalars(select(Device).where(Device.id.in_(dev_ids)))} if dev_ids else {}
+    users = {u.id: u for u in db.scalars(select(User).where(User.id.in_(user_ids)))} if user_ids else {}
+    return {"items": [_out(db, a, devs, users) for a in rows], "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/alerts/summary")
 def alert_summary(ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
     org = ctx.user.organization_id
+    own = (SecurityAlert.owner_admin_id == tenancy.scope_admin_id(ctx),) if tenancy.scope_admin_id(ctx) is not None else ()
     open_by_sev = dict(db.execute(select(SecurityAlert.severity, func.count()).where(
-        SecurityAlert.organization_id == org, SecurityAlert.status.in_(alerts.OPEN)).group_by(SecurityAlert.severity)).all())
+        SecurityAlert.organization_id == org, SecurityAlert.status.in_(alerts.OPEN), *own).group_by(SecurityAlert.severity)).all())
     since = utcnow() - timedelta(days=13)
     start = datetime(since.year, since.month, since.day, tzinfo=timezone.utc)
     days = {(start + timedelta(days=i)).date().isoformat(): 0 for i in range(14)}
     for ts in db.scalars(select(SecurityAlert.detected_at).where(SecurityAlert.organization_id == org,
-                                                                 SecurityAlert.detected_at >= start)):
+                                                                 SecurityAlert.detected_at >= start, *own)):
         k = ts.date().isoformat()
         if k in days:
             days[k] += 1
     return {"open_by_severity": {s: open_by_sev.get(s, 0) for s in alerts.SEVERITIES},
             "open_total": sum(open_by_sev.values()),
-            "unassigned": db.scalar(select(func.count()).select_from(SecurityAlert).where(
+            "unassigned": db.scalar(select(func.count()).select_from(SecurityAlert).where(*own, 
                 SecurityAlert.organization_id == org, SecurityAlert.status.in_(alerts.OPEN),
                 SecurityAlert.assigned_to.is_(None))) or 0,
             "detected_by_day": [{"date": k, "count": v} for k, v in days.items()]}
@@ -191,7 +198,7 @@ def export_report(key: str, format: Literal["csv", "pdf"] = "csv", date_from: da
         raise HTTPException(422, "Invalid period (max 366 days)")
     start = datetime.combine(start_d, time.min, timezone.utc)
     end = datetime.combine(end_d + timedelta(days=1), time.min, timezone.utc)
-    cols, rows = r.build(db, ctx.user.organization_id, start, end)
+    cols, rows = r.build(db, ctx.user.organization_id, start, end, tenancy.scope_admin_id(ctx))
     org = db.get(Organization, ctx.user.organization_id)
     period = f"{start_d} to {end_d}" if r.dated else None
     stamp = f"{utcnow():%Y%m%d-%H%M}"

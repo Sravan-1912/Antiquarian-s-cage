@@ -56,6 +56,9 @@ class User(UUIDPk, Timestamps, Base):
     __table_args__ = (Index("uq_users_org_email", "organization_id", text("lower(email)"), unique=True),)
 
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    # Admin isolation: the admin tenant this account belongs to. NULL for a Super Admin, or for an Admin who is a
+    # tenant root themselves (their own id is then used as the scope). See app/services/tenancy.py.
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     email: Mapped[str] = mapped_column(String(320))
     full_name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str | None] = mapped_column(String(255))

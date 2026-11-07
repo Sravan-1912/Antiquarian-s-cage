@@ -30,14 +30,12 @@ services:
   migrate:
     build: { context: ./backend, dockerfile: ../infrastructure/docker/backend.Dockerfile }
     command: ["alembic", "upgrade", "head"]
+    env_file: .env   # full settings: the production guards validate the configuration before migrating
     environment:
       # Migrations run as the schema owner; the API runs as the least-privilege cage_app role.
-      DATABASE_URL: postgresql+psycopg://cage_owner:${POSTGRES_PASSWORD}@postgres:5432/antiquarians_cage
-      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY}
-      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY}
-      ENVIRONMENT: ${ENVIRONMENT:-production}
+      MIGRATION_DATABASE_URL: postgresql+psycopg://cage_owner:${POSTGRES_PASSWORD}@postgres:5432/antiquarians_cage
+      DATABASE_URL: postgresql+psycopg://cage_app:${APP_DB_PASSWORD}@postgres:5432/antiquarians_cage
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-      SMTP_HOST: ${SMTP_HOST:-}
     depends_on: { postgres: { condition: service_healthy } }
     networks: [backend]
 
@@ -47,11 +45,15 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://cage_app:${APP_DB_PASSWORD}@postgres:5432/antiquarians_cage
+      MIGRATION_DATABASE_URL: postgresql+psycopg://cage_owner:${POSTGRES_PASSWORD}@postgres:5432/antiquarians_cage
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       TRUST_PROXY_HEADERS: "true"
+      DEVICE_CA_DIR: /app/var/pki
+      AUDIT_ANCHOR_DIR: /app/anchors   # mount WORM/remote storage here in production
     volumes:
       # Device CA + signing keys: losing this volume invalidates every enrolled agent. Back it up.
       - cagekeys:/app/var
+      - cageanchors:/app/anchors
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_started }
@@ -69,6 +71,7 @@ services:
 volumes:
   pgdata:
   cagekeys:
+  cageanchors:
   redisdata:
 
 networks:

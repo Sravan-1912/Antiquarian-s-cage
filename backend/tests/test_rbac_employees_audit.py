@@ -34,9 +34,12 @@ def test_rbac_matrix_enforced_by_backend(client, outbox):
     assert client.get("/api/v1/dashboard/summary").status_code == 200
     client.post("/api/v1/auth/logout", headers=csrf(client))
 
-    # Admin: manages employees but cannot manage administrators or read audit logs.
+    # Admin: manages the employees it owns, but cannot manage administrators or read audit logs, and is isolated from
+    # the Super Admin's own org-level employee (admin isolation).
     login(client, "admin@example.com")
-    emp_id = client.get("/api/v1/employees").json()["items"][0]["id"]
+    assert all(i["email"] != EMP["email"] for i in client.get("/api/v1/employees").json()["items"])
+    emp_id = client.post("/api/v1/employees", json={**EMP, "employee_number": "E-A", "email": "a@example.com"},
+                         headers=csrf(client)).json()["id"]
     assert client.post(f"/api/v1/employees/{emp_id}/suspend", json={"reason": "investigation"},
                        headers=csrf(client)).status_code == 200
     assert client.post("/api/v1/users", json={"email": "z@example.com", "full_name": "Zed Zed", "role": "super_admin"},
