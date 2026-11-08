@@ -183,6 +183,19 @@ def revoke(db: Session, cred: WebAuthnCredential, actor: Actor, by_user_id: uuid
     db.commit()
 
 
+def revoke_all(db: Session, user: User, actor: Actor) -> int:
+    """Revoke every active passkey for a user (used during admin-issued recovery before a fresh one is registered)."""
+    n = 0
+    for cred in active_credentials(db, user.id):
+        cred.revoked_at = utcnow()
+        cred.revoked_by = actor.user_id
+        n += 1
+    if n:
+        audit.record(db, user.organization_id, actor, "auth.passkeys_revoked_for_recovery", target_type="user",
+                     target_id=user.id, target_label=user.email, metadata={"count": n})
+    return n
+
+
 def describe(c: WebAuthnCredential) -> dict:
     return {"id": str(c.id), "name": c.name, "created_at": c.created_at, "last_used_at": c.last_used_at,
             "synced": c.backed_up, "transports": (c.transports or {}).get("transports", []),

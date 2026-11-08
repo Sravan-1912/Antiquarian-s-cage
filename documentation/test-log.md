@@ -186,3 +186,16 @@ Console in the desktop app's built-in Chromium browser; PostgreSQL 16 dev databa
 | Resolution: admin subscription → org default → built-in trial; Super Admin org-level uncapped | ✅ | test_subscriptions.py (6 tests) |
 | Super Admin assigns a plan / org default; revoking a device frees a slot; admins cannot change plans | ✅ | PUT /admins/{id}/subscription, PUT /organization/subscription, GET /subscription(+/plans), GET /subscriptions |
 | Full suite | ✅ | 105 passed on PostgreSQL, 103 on SQLite (+2 skipped) |
+
+## 2026-11-08 — Passkey-only auth, Stage A (additive, passwordless onboarding + recovery)
+
+| Capability | Result | Notes |
+|---|---|---|
+| Passwordless bootstrap (register with no password → enrol token → passkey → signed in) | ✅ | `POST /auth/register` returns `enroll_token`; `/auth/enroll/options`+`/verify` run the ceremony |
+| Invite doubles as passkey enrolment (invite token accepted by /auth/enroll/*) | ✅ | No password set for invited admins |
+| Admin-issued recovery revokes old passkeys, enrols a new one | ✅ | `POST /users/{id}/recovery`; requires `users:manage` |
+| Break-glass CLI (`python -m app.recover <email>`) mints a working recovery link | ✅ | Ran on the dev DB; prints an absolute /recover URL |
+| Single-use + expiry on enrol/invite/recovery tokens | ✅ | 5 tests in test_passkey_enrollment.py (real py_webauthn via SoftAuthenticator) |
+| Legacy password login/bootstrap still works (Stage A is additive) | ✅ | Nothing removed yet |
+| Frontend ceremony pages (SetupPage passwordless, AcceptInvitePage, /recover) | ✅ typecheck | Live browser ceremony needs a real authenticator (Windows Hello/security key) — not automatable here |
+| Full suite | ✅ | 110 passed on PostgreSQL (108 on SQLite +2 skipped) |

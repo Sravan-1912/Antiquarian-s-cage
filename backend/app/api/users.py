@@ -96,6 +96,27 @@ def resend_invite(user_id: uuid.UUID, ctx: AuthContext = Depends(require_permiss
     return Message(detail="Invitation resent")
 
 
+@router.post("/{user_id}/recovery", response_model=Message)
+def issue_passkey_recovery(user_id: uuid.UUID, ctx: AuthContext = Depends(require_permission("users:manage")),
+                           db: Session = Depends(get_db)):
+    """Admin-issued passkey recovery (replaces password reset): a single-use link that lets the user register a fresh
+    passkey. Any existing passkeys are revoked when the new one is enrolled."""
+    user = _get(db, ctx, user_id)
+    if user.status == "disabled":
+        raise HTTPException(409, "Re-enable the account before issuing recovery")
+    raw = auth.issue_recovery(db, user)
+    audit.record(db, user.organization_id, ctx.actor, "user.recovery_issued", target_type="user", target_id=user.id,
+                 target_label=user.email)
+    db.commit()
+    try:
+        email.send_email(user.email, "Recover access to Antiquarian's Cage",
+                         f"Hello {user.full_name},\n\n{ctx.user.full_name} issued a recovery link so you can register "
+                         f"a new passkey. It is valid for 1 hour and can be used once:\n{email.link('/recover', raw)}")
+    except EmailDeliveryError:
+        raise HTTPException(502, "Recovery link created, but the email could not be sent. Resend it later.")
+    return Message(detail="Recovery link sent")
+
+
 @router.put("/{user_id}/roles", response_model=AdminUserOut)
 def set_roles(user_id: uuid.UUID, body: SetRolesRequest,
               ctx: AuthContext = Depends(require_permission("users:manage")), db: Session = Depends(get_db)):

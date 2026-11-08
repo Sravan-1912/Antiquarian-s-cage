@@ -100,12 +100,18 @@ def needs_setup(db: Session) -> bool:
     return db.scalar(select(func.count()).select_from(User)) == 0
 
 
-def register_first_admin(db: Session, *, org_name: str, full_name: str, email_addr: str, password: str,
-                         client: ClientInfo) -> User:
-    """Creates the organisation and its first Super Admin. Only possible while no users exist."""
+def register_first_admin(db: Session, *, org_name: str, full_name: str, email_addr: str, password: str | None,
+                         client: ClientInfo) -> tuple[User, str | None]:
+    """Creates the organisation and its first Super Admin. Only possible while no users exist.
+
+    Passwordless bootstrap (password is None): the account is created `pending` and a single-use passkey-enrolment
+    token is returned so the browser can immediately register a passkey (no password is ever set). The legacy
+    password path (password given) is kept during the passkey-only migration (Stage A). Returns (user, enroll_token).
+    """
     if not needs_setup(db):
         raise AuthError("Registration is closed. Ask a Super Admin to invite you.", 403)
-    _check_password(password, email_addr, full_name)
+    if password is not None:
+        _check_password(password, email_addr, full_name)
     rbac.sync_rbac(db)
     org = default_org(db) or Organization(name=org_name.strip(), slug=slugify(org_name), settings={})
     db.add(org)
@@ -114,9 +120,9 @@ def register_first_admin(db: Session, *, org_name: str, full_name: str, email_ad
         organization_id=org.id,
         email=email_addr.strip().lower(),
         full_name=full_name.strip(),
-        password_hash=hash_password(password),
-        status="active",
-        password_changed_at=utcnow(),
+        password_hash=hash_password(password) if password is not None else None,
+        status="active" if password is not None else "pending",
+        password_changed_at=utcnow() if password is not None else None,
     )
     db.add(user)
     db.flush()
@@ -124,14 +130,18 @@ def register_first_admin(db: Session, *, org_name: str, full_name: str, email_ad
     if role is None:
         raise RuntimeError("role catalogue not synchronised (super_admin missing)")
     db.add(UserRole(user_id=user.id, role_id=role.id, granted_by=None))
-    raw = _issue_token(db, user, "email_verify", timedelta(hours=get_settings().email_token_ttl_hours))
     audit.record(db, org.id, Actor("user", user.id, user.email, client.ip), "org.bootstrap",
                  target_type="organization", target_id=org.id, target_label=org.name)
     audit.record(db, org.id, Actor("user", user.id, user.email, client.ip), "user.register",
                  target_type="user", target_id=user.id, target_label=user.email, metadata={"role": "super_admin"})
+    if password is not None:
+        raw = _issue_token(db, user, "email_verify", timedelta(hours=get_settings().email_token_ttl_hours))
+        db.commit()
+        _send_verification(user, raw)
+        return user, None
+    enroll = _issue_token(db, user, "passkey_enroll", timedelta(hours=get_settings().invite_token_ttl_hours))
     db.commit()
-    _send_verification(user, raw)
-    return user
+    return user, enroll
 
 
 def _send_verification(user: User, raw: str) -> None:
@@ -448,3 +458,50 @@ def accept_invite(db: Session, raw: str, password: str, client: ClientInfo) -> U
 
 def issue_invite(db: Session, user: User) -> str:
     return _issue_token(db, user, "invite", timedelta(hours=get_settings().invite_token_ttl_hours))
+
+
+# ------------------------------------------------------------------------- passkey enrolment (passwordless)
+# An invite link doubles as a first-passkey enrolment link, so an invited admin can register a passkey instead of
+# setting a password. Recovery tokens re-enrol a passkey for a locked-out account (admin-issued or break-glass).
+ENROLL_PURPOSES = ("passkey_enroll", "passkey_recovery", "invite")
+
+
+def peek_enroll_user(db: Session, raw: str) -> tuple[User, str]:
+    """Resolve (user, purpose) for an unused, unexpired enrolment/invite/recovery token WITHOUT consuming it, so the
+    registration options and the verify step can use the same token."""
+    tok = db.scalar(select(AuthToken).where(AuthToken.token_hash == hash_token(raw),
+                                            AuthToken.purpose.in_(ENROLL_PURPOSES)))
+    if tok is None or tok.used_at is not None or tok.expires_at < utcnow():
+        raise AuthError("This link is invalid or has expired.", 400)
+    user = db.get(User, tok.user_id)
+    if user is None or user.status == "disabled":
+        raise AuthError("This link is invalid or has expired.", 400)
+    return user, tok.purpose
+
+
+def issue_recovery(db: Session, user: User) -> str:
+    """Single-use token that lets a user register a fresh passkey (replaces password reset). Admin-issued only."""
+    return _issue_token(db, user, "passkey_recovery", timedelta(hours=1))
+
+
+def complete_enroll(db: Session, raw: str, user: User, purpose: str, client: ClientInfo) -> LoginResult:
+    """Consume the enrolment token, activate the account, revoke old passkeys on recovery, and start a session. The
+    passkey itself is registered by passkeys.register() just before this is called (it owns the WebAuthn verify)."""
+    tok = db.scalar(select(AuthToken).where(AuthToken.token_hash == hash_token(raw),
+                                            AuthToken.purpose.in_(ENROLL_PURPOSES)))
+    if tok is None or tok.used_at is not None or tok.expires_at < utcnow() or tok.user_id != user.id:
+        raise AuthError("This link is invalid or has expired.", 400)
+    tok.used_at = utcnow()
+    user.status = "active"
+    user.email_verified_at = user.email_verified_at or utcnow()  # possession of the emailed link proves the address
+    user.failed_login_count = 0
+    user.locked_until = None
+    event = "invite_accepted" if purpose == "invite" else ("passkey_recovered" if purpose == "passkey_recovery"
+                                                            else "passkey_enrolled")
+    _event(db, user.organization_id, user, event, True, client)
+    audit.record(db, user.organization_id, Actor("user", user.id, user.email, client.ip), f"user.{event}",
+                 target_type="user", target_id=user.id, target_label=user.email, metadata={"via": purpose})
+    token, csrf = _create_session(db, user, client, mfa_verified=True, amr=["hwk", "user", "mfa", "passkey"])
+    _complete_login(db, user, client, "passkey")
+    db.commit()
+    return LoginResult(user, token, csrf, mfa_required=False)

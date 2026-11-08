@@ -22,9 +22,27 @@ class RegisterRequest(BaseModel):
     organization_name: str = Name
     full_name: str = Name
     email: EmailStr
-    password: str = Password
+    # Optional: omit for passwordless bootstrap (register the first passkey via the returned enrol token).
+    password: str | None = Field(default=None, min_length=1, max_length=256)
 
     _s = field_validator("organization_name", "full_name")(_strip)
+
+
+class RegisterResponse(BaseModel):
+    detail: str
+    # Present only for passwordless bootstrap: the single-use token the browser uses to register the first passkey.
+    enroll_token: str | None = None
+
+
+class EnrollOptionsRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=100)
+
+
+class EnrollVerifyRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=100)
+    challenge_id: uuid.UUID
+    credential: dict
+    name: str = Field(default="Passkey", min_length=1, max_length=64)
 
 
 class LoginRequest(BaseModel):

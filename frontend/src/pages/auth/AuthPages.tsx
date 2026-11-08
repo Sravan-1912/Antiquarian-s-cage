@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { KeyRound, Smartphone } from 'lucide-react'
 import { PhoneApproval } from './PhoneSignIn'
+import { PasskeyEnrol } from './PasskeyEnrol'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AuthLayout } from '@/layouts/AuthLayout'
@@ -163,28 +164,26 @@ export function SsoErrorPage() {
 }
 
 export function SetupPage() {
+  const { refresh } = useAuth()
   const nav = useNavigate()
-  const [form, setForm] = useState({ organization_name: '', full_name: '', email: '', password: '', confirm: '' })
+  const [form, setForm] = useState({ organization_name: '', full_name: '', email: '' })
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
+  const [enrollToken, setEnrollToken] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const setup = useQuery({ queryKey: ['bootstrap'], queryFn: () => api.get<{ needs_setup: boolean }>('/auth/bootstrap-status') })
 
   if (setup.isLoading) return <div className="grid h-full place-items-center"><Spinner /></div>
-  if (setup.data && !setup.data.needs_setup && !done) return <Navigate to="/login" replace />
+  if (setup.data && !setup.data.needs_setup && !enrollToken) return <Navigate to="/login" replace />
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value })
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError(null)
-    if (form.password !== form.confirm) return setError('Passwords do not match.')
     setBusy(true)
     try {
-      const { confirm: _c, ...body } = form
-      void _c
-      const r = await api.post<{ detail: string }>('/auth/register', body)
-      setDone(r.detail)
+      const r = await api.post<{ detail: string; enroll_token: string | null }>('/auth/register', form)
+      setEnrollToken(r.enroll_token)  // passwordless bootstrap returns the token for the passkey ceremony
     } catch (err) {
       setError(describeError(err))
     } finally {
@@ -192,10 +191,12 @@ export function SetupPage() {
     }
   }
 
-  if (done) {
+  async function done() { await refresh(); nav('/') }
+
+  if (enrollToken) {
     return (
-      <AuthLayout title="Check your email" subtitle={done}>
-        <Button className="w-full" variant="secondary" onClick={() => nav('/login')}>Go to sign in</Button>
+      <AuthLayout title="Create your passkey" subtitle="Finish setting up the first Super Admin. No password needed.">
+        <PasskeyEnrol token={enrollToken} defaultName="This device" cta="Create passkey and sign in" onDone={done} />
       </AuthLayout>
     )
   }
@@ -207,13 +208,22 @@ export function SetupPage() {
         <Field label="Organisation name" htmlFor="org"><Input id="org" required minLength={2} value={form.organization_name} onChange={set('organization_name')} /></Field>
         <Field label="Full name" htmlFor="name"><Input id="name" required minLength={2} autoComplete="name" value={form.full_name} onChange={set('full_name')} /></Field>
         <Field label="Work email" htmlFor="email"><Input id="email" type="email" required autoComplete="email" value={form.email} onChange={set('email')} /></Field>
-        <Field label="Password" htmlFor="pw" hint={undefined}>
-          <Input id="pw" type="password" required minLength={12} autoComplete="new-password" value={form.password} onChange={set('password')} />
-          <p className="mt-1 text-xs text-silver-600"><PasswordHint /></p>
-        </Field>
-        <Field label="Confirm password" htmlFor="pw2"><Input id="pw2" type="password" required autoComplete="new-password" value={form.confirm} onChange={set('confirm')} /></Field>
-        <Button type="submit" className="w-full" loading={busy}>Create organisation</Button>
+        <Button type="submit" className="w-full" loading={busy}>Continue to passkey</Button>
       </form>
+    </AuthLayout>
+  )
+}
+
+/** Passkey recovery (admin-issued or break-glass link): register a fresh passkey from a single-use token. */
+export function RecoverPage() {
+  const { refresh } = useAuth()
+  const nav = useNavigate()
+  const [params] = useSearchParams()
+  const token = params.get('token')
+  async function done() { await refresh(); nav('/') }
+  return (
+    <AuthLayout title="Register a new passkey" subtitle="Recover access to your account. Any old passkeys are replaced.">
+      <PasskeyEnrol token={token} defaultName="New device" cta="Register passkey and sign in" onDone={done} />
     </AuthLayout>
   )
 }
@@ -317,6 +327,16 @@ function SetPasswordForm({ endpoint, field, title, subtitle }: { endpoint: strin
 export const ResetPasswordPage = () => (
   <SetPasswordForm endpoint="/auth/password/reset" field="new_password" title="Choose a new password" subtitle="All existing sessions will be signed out." />
 )
-export const AcceptInvitePage = () => (
-  <SetPasswordForm endpoint="/auth/invite/accept" field="password" title="Activate your account" subtitle="Set a password to finish accepting your administrator invitation." />
-)
+/** Invitation acceptance: register a passkey (the invite link doubles as a passkey-enrolment token). No password. */
+export function AcceptInvitePage() {
+  const { refresh } = useAuth()
+  const nav = useNavigate()
+  const [params] = useSearchParams()
+  const token = params.get('token')
+  async function done() { await refresh(); nav('/') }
+  return (
+    <AuthLayout title="Activate your account" subtitle="Finish accepting your invitation by creating a passkey.">
+      <PasskeyEnrol token={token} defaultName="This device" cta="Create passkey and sign in" onDone={done} />
+    </AuthLayout>
+  )
+}

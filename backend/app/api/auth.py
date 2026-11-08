@@ -50,18 +50,54 @@ def bootstrap_status(db: Session = Depends(get_db)):
     return s.BootstrapStatus(needs_setup=auth.needs_setup(db))
 
 
-@router.post("/register", response_model=Message, status_code=201,
+@router.post("/register", response_model=s.RegisterResponse, status_code=201,
              dependencies=[Depends(rate_limit("register", 5))])
 def register(body: s.RegisterRequest, request: Request, db: Session = Depends(get_db)):
-    """Creates the first Super Admin. Closed once any user exists; further admins are invited."""
+    """Creates the first Super Admin. Closed once any user exists; further admins are invited.
+
+    Passwordless (no password in the body): returns a single-use enrol token the browser uses to register the first
+    passkey via /auth/enroll/*. Legacy password path kept during the passkey-only migration.
+    """
     try:
-        auth.register_first_admin(db, org_name=body.organization_name, full_name=body.full_name,
-                                  email_addr=str(body.email), password=body.password, client=client_info(request))
+        _, enroll = auth.register_first_admin(db, org_name=body.organization_name, full_name=body.full_name,
+                                              email_addr=str(body.email), password=body.password,
+                                              client=client_info(request))
     except AuthError as e:
         _raise(e)
     except EmailDeliveryError:
         raise HTTPException(502, "Account created, but the verification email could not be sent.")
-    return Message(detail="Account created. Check your email to verify your address before signing in.")
+    if enroll is not None:
+        return s.RegisterResponse(detail="Organisation created. Register your passkey to finish.", enroll_token=enroll)
+    return s.RegisterResponse(detail="Account created. Check your email to verify your address before signing in.")
+
+
+@router.post("/enroll/options", dependencies=[Depends(rate_limit("enroll", 20))])
+def enroll_options(body: s.EnrollOptionsRequest, db: Session = Depends(get_db)):
+    """Registration-ceremony options for a passwordless enrol/invite/recovery token (no session needed)."""
+    from app.services import passkeys
+    try:
+        user, _purpose = auth.peek_enroll_user(db, body.token)
+    except AuthError as e:
+        _raise(e)
+    challenge_id, options = passkeys.registration_options(db, user)
+    return {"challenge_id": str(challenge_id), "options": options}
+
+
+@router.post("/enroll/verify", response_model=s.LoginResponse, dependencies=[Depends(rate_limit("enroll", 20))])
+def enroll_verify(body: s.EnrollVerifyRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    """Register the passkey, activate the account, and sign in. Replaces password set-up for bootstrap/invite/recovery."""
+    from app.services import passkeys
+    client = client_info(request)
+    try:
+        user, purpose = auth.peek_enroll_user(db, body.token)
+        if purpose == "passkey_recovery":
+            passkeys.revoke_all(db, user, auth.Actor("user", user.id, user.email, client.ip))
+        passkeys.register(db, user, body.challenge_id, body.credential, body.name, client)  # owns WebAuthn verify
+        result = auth.complete_enroll(db, body.token, user, purpose, client)
+    except AuthError as e:
+        _raise(e)
+    _set_cookies(response, result.session_token, result.csrf_token)
+    return s.LoginResponse(mfa_required=False)
 
 
 @router.post("/verify-email", response_model=Message, dependencies=[Depends(rate_limit("token", 20))])
