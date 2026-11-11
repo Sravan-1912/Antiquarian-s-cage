@@ -1,5 +1,8 @@
-"""Phone approval sign-in: console endpoints (cookie session + CSRF) and app endpoints (no cookies; the app
-authenticates with its per-phone poll secret, and every approval is signed by the biometric-protected key)."""
+"""Phone authenticator management (console, for a signed-in user) and the authenticator-app endpoints (no cookies;
+the app authenticates with its per-phone poll secret, and every approval is signed by the biometric-protected key).
+
+Passkey-only: there is no phone-approval *console sign-in*. A phone is a console passkey via standard WebAuthn
+instead; pairing here binds a biometric-protected key used only for Windows laptop unlock (Phase 10)."""
 from __future__ import annotations
 
 import uuid
@@ -10,16 +13,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.auth import _set_cookies
 from app.api.deps import AuthContext, client_info, current_context, rate_limit, require_permission
-from app.core.config import get_settings
 from app.core.database import get_db
 from app.models import PhoneAuthenticator, User
 from app.services import phone_auth
 from app.services.auth import AuthError
 
 router = APIRouter(tags=["phone authenticator"])
-BROWSER_COOKIE = "cage_phone_req"
 
 
 def _err(e: phone_auth.PhoneAuthError | AuthError):
@@ -75,40 +75,6 @@ def admin_remove(user_id: uuid.UUID, aid: uuid.UUID, ctx: AuthContext = Depends(
     phone_auth.revoke(db, a, ctx.actor)
     db.commit()
     return {"removed": True}
-
-
-# ------------------------------------------------------------------------------------- browser sign-in
-class PhoneStart(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-
-
-@router.post("/auth/phone/start", dependencies=[Depends(rate_limit("phone-login", 10))])
-def phone_start(body: PhoneStart, request: Request, response: Response, db: Session = Depends(get_db)):
-    st = phone_auth.start_login(db, body.email, client_info(request))
-    db.commit()
-    s = get_settings()
-    response.set_cookie(BROWSER_COOKIE, st.browser_secret, max_age=180, httponly=True, secure=s.cookie_secure,
-                        samesite="strict", path="/api/v1/auth/phone")
-    return {"request_id": str(st.request_id), "number": st.number, "expires_at": st.expires_at}
-
-
-class PhoneCollect(BaseModel):
-    request_id: uuid.UUID
-
-
-@router.post("/auth/phone/status", dependencies=[Depends(rate_limit("phone-status", 120))])
-def phone_status(body: PhoneCollect, request: Request, response: Response, db: Session = Depends(get_db)):
-    try:
-        status, res = phone_auth.collect(db, body.request_id, request.cookies.get(BROWSER_COOKIE, ""),
-                                         client_info(request))
-    except (phone_auth.PhoneAuthError, AuthError) as e:
-        db.commit()
-        _err(e)
-    db.commit()
-    if res is not None:
-        _set_cookies(response, res.session_token, res.csrf_token)
-        response.delete_cookie(BROWSER_COOKIE, path="/api/v1/auth/phone")
-    return {"status": status}
 
 
 # ------------------------------------------------------------------------------------- authenticator app
