@@ -113,3 +113,89 @@ Console in the desktop app's built-in Chromium browser; PostgreSQL 16 dev databa
 | Failed-sign-in burst, password spray, success-after-failures, auto-resolve, agent silence, deployment failures, USB with policy, admin burst, remote anomalies, workflow + RBAC, preferences, outbox | ✅ in tests only | 10 backend tests |
 | Celery beat (production scheduler) | ❌ not verified | Redis not installed |
 | Real SMTP delivery | ❌ not verified | Development mail outbox only |
+
+## 2026-11-06 — Phase 7 (hardening)
+
+| Capability | Result | Notes |
+|---|---|---|
+| Dependency audit (pip-audit backend + agent, npm audit) | ✅ | No known vulnerabilities |
+| Bandit static analysis | ✅ | Only accepted Low findings remain (see SECURITY.md); asserts replaced; absolute System32 paths |
+| Secrets scan | ✅ | None committed; `.dockerignore` added |
+| Audit anchoring — live | ✅ | Console *Anchor now* → record #63 anchored and written externally; *Verify integrity*: 63 records, 2 anchors (scheduler + manual), no problems |
+| Audit anchoring — tamper scenarios | ✅ in tests | Tail truncation by an owner who disables the trigger (PostgreSQL), anchor deleted from DB, external file deleted, external write failure → alert, offline verifier rejects a forged line |
+| Query scaling (N+1) on 310 seeded devices | ✅ | All 39 list/summary/report endpoints constant query count; 9 N+1s found and fixed |
+| Playwright E2E (Edge) | ✅ 5/5 | Setup → email verification → sign-in; uniform wrong-password message; TOTP enrolment and MFA sign-in; create employee → audit → verify; invited Security Analyst: UI hides and API returns 403 for employee creation and admin invites |
+| Backup → restore drill on the dev database | ✅ | 71 KB encrypted bundle; restored into a scratch DB; row counts match; audit chain (64) and anchors (2) verified with restored keys; scratch DB dropped |
+| Backup tamper / wrong passphrase | ✅ | Both refused before anything is restored |
+| Production guards | ✅ in tests | 11 tests; `app.preflight` on dev: 0 failed, 3 expected warnings (no Redis/SMTP/TLS locally) |
+| Docker Compose stack, Nginx mTLS, Redis, SMTP | ❌ not verified | Not installed on this machine |
+
+## 2026-11-06 — Phase 8 (phone sign-in) and Phase 9 (fleet overview, network usage)
+
+| Capability | Result | Notes |
+|---|---|---|
+| Phone pairing / sign-in protocol | ✅ in tests | 9 backend tests with software EC and RSA keys: full flow, wrong number → denied + high alert, foreign-key signature, replay, other browser cannot collect, decoy for unknown email, expiry, pairing reuse/bad signature, removed phone |
+| App protocol vs live dev API | ✅ | Node script reproducing `mobile/src/core.ts` byte-for-byte (Android-style wrapped Base64 RSA key): pair → browser phone sign-in → approve → session → removal rejected |
+| Console: pairing QR, "Sign in with your phone" screen | ✅ | Rendered in the browser; QR single-use with countdown |
+| Android release APK | ✅ built | `mobile/dist/cage-authenticator-1.0.0.apk` (85 MB, minSdk 24, target 36), signed with the project release key (apksigner verified, cert SHA-256 564a5289…); permissions limited to camera, internet, biometric, network state. Built on Windows from a mirrored path (`mobile/build-android.ps1`) because the apostrophe in the project path breaks React Native's cmd calls |
+| App on a physical phone (camera scan, fingerprint, approval) | ❌ not verified | No phone connected to this machine |
+| iOS .ipa | ❌ not built | Needs macOS or Expo EAS + Apple Developer account |
+| Network usage from the real agent (0.5.0) | ✅ | After two heartbeats the dashboard showed 853 MB (849 MB received, 4.4 MB sent) for this PC while it downloaded Android build dependencies |
+| Network counter logic | ✅ in tests | Deltas, reboot reset, baseline-only devices not counted, agent adapter filter keeps "Local Area Connection", skips loopback |
+| Redesigned overview (health chip, KPI cards, platform, last contact, network) | ✅ | Live data: 1 urgent alert (Defender off), 1/1 device online, 3 active policies |
+
+## 2026-11-07 — Phase 10 (Windows sign-in approved from the phone) — built, not yet on a lock screen
+
+| Capability | Result | Notes |
+|---|---|---|
+| Server key escrow + approval flow | ✅ in tests | 6 tests (setup approval, single release, denial, cross-device, other SID, unassigned/no phone, revocation, key size); full suite 95/95 on PostgreSQL |
+| Agent unlock relay | ✅ in tests | 4 tests incl. real named pipe in dev mode and refusal of a non-SYSTEM client in production mode (fails closed) |
+| Credential provider core (C++) | ✅ | 28 checks: AES-GCM seal/open with wrong key / wrong SID / tamper rejection, machine DPAPI store, SID lookup, Kerberos packing, LSA lookup |
+| Credential provider COM object outside LogonUI | ✅ | 16 checks via a harness that loads the DLL without registering it; no credential produced on any error path |
+| DLL hardening | ✅ | /W4 /WX /sdl, Control Flow Guard, Spectre mitigations, ASLR, DEP (DLL characteristics 0x4160) |
+| Registered on this PC's lock screen | ❌ deliberately not | Owner's personal PC; existing VirtualBox VM is Windows 7 (unsupported) — needs a Windows 10/11 test VM |
+| Tile on a real lock screen, Windows accepting the credential | ❌ not verified | See documentation/12-windows-phone-unlock.md, verification plan |
+
+### 2026-11-07 — Cage Authenticator 1.0.1 on a physical phone
+
+| Step | Result | Notes |
+|---|---|---|
+| Install signed APK on vivo I2404 (Android) | ✅ | Sideloaded |
+| Phone → PC network path | ⚠️ then ✅ | First attempt never reached the API (McAfee firewall active on the PC / Wi-Fi path); resolved by the owner, then `/authenticator/pair` arrived |
+| Pairing: QR scan → fingerprint → signed proof of key possession | ✅ | Authenticator "vivo I2404", platform android, RS256 key from Android Keystore; app polling `/authenticator/pending` every 3 s |
+
+## 2026-11-07 — Admin isolation (row-level multi-tenancy)
+
+| Capability | Result | Notes |
+|---|---|---|
+| `owner_admin_id` on users/employees/devices/enrollment_tokens/endpoint_policies/security_alerts (migration 0011, up/down) | ✅ | Batch mode so it applies on SQLite and PostgreSQL |
+| `tenant:global` permission attached to super_admin only | ✅ | RBAC sync verified in the dev DB |
+| Two admins fully isolated; Super Admin sees all; admin creating stamps ownership | ✅ | 4 tests in test_admin_isolation.py (lists, get-by-id 404, dashboard counts, admin cannot create admins) |
+| Super-admin-created analyst keeps org-wide view | ✅ | Org security staff are not tenant-scoped |
+| Scoping applied to devices, employees, users, enrollment tokens, dashboard, alerts, compliance, policies, reports, network usage | ✅ | Central helper app/services/tenancy.py |
+| Existing RBAC/secops tests updated for the new model | ✅ | Admin now manages only its own employees/alerts |
+| Full suite | ✅ | 99 passed on PostgreSQL, 97 on SQLite (+2 skipped) |
+
+## 2026-11-07 — Subscription tiers and device quotas
+
+| Capability | Result | Notes |
+|---|---|---|
+| subscription_plans + subscriptions tables (migration 0012, up/down) | ✅ | Plan catalogue synced at startup: trial 5 / starter 25 / business 100 / enterprise 1000 / unlimited |
+| Quota enforced at enrollment (agent channel, authoritative) | ✅ | 6th device on a trial admin rejected with HTTP 402; a pre-issued token is also rejected at enroll time |
+| Friendly pre-check at enrollment-token creation | ✅ | 402 before issuing a token the agent could not use |
+| Resolution: admin subscription → org default → built-in trial; Super Admin org-level uncapped | ✅ | test_subscriptions.py (6 tests) |
+| Super Admin assigns a plan / org default; revoking a device frees a slot; admins cannot change plans | ✅ | PUT /admins/{id}/subscription, PUT /organization/subscription, GET /subscription(+/plans), GET /subscriptions |
+| Full suite | ✅ | 105 passed on PostgreSQL, 103 on SQLite (+2 skipped) |
+
+## 2026-11-08 — Passkey-only auth, Stage A (additive, passwordless onboarding + recovery)
+
+| Capability | Result | Notes |
+|---|---|---|
+| Passwordless bootstrap (register with no password → enrol token → passkey → signed in) | ✅ | `POST /auth/register` returns `enroll_token`; `/auth/enroll/options`+`/verify` run the ceremony |
+| Invite doubles as passkey enrolment (invite token accepted by /auth/enroll/*) | ✅ | No password set for invited admins |
+| Admin-issued recovery revokes old passkeys, enrols a new one | ✅ | `POST /users/{id}/recovery`; requires `users:manage` |
+| Break-glass CLI (`python -m app.recover <email>`) mints a working recovery link | ✅ | Ran on the dev DB; prints an absolute /recover URL |
+| Single-use + expiry on enrol/invite/recovery tokens | ✅ | 5 tests in test_passkey_enrollment.py (real py_webauthn via SoftAuthenticator) |
+| Legacy password login/bootstrap still works (Stage A is additive) | ✅ | Nothing removed yet |
+| Frontend ceremony pages (SetupPage passwordless, AcceptInvitePage, /recover) | ✅ typecheck | Live browser ceremony needs a real authenticator (Windows Hello/security key) — not automatable here |
+| Full suite | ✅ | 110 passed on PostgreSQL (108 on SQLite +2 skipped) |

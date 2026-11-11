@@ -19,6 +19,7 @@ class Employee(UUIDPk, Timestamps, Base):
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"))
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)  # admin isolation
     employee_number: Mapped[str] = mapped_column(String(32))
     full_name: Mapped[str] = mapped_column(String(200))
     email: Mapped[str] = mapped_column(String(320))

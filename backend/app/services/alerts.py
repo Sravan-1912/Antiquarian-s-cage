@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import utcnow
 from app.models import (
-    AlertEvent, AuditLog, AuthenticationEvent, Device, EndpointPolicy, PolicyAssignment, PolicyDeployment,
+    AlertEvent, AuditLog, AuthenticationEvent, Device, Employee, EndpointPolicy, PolicyAssignment, PolicyDeployment,
     SecurityAlert, User,
 )
 from app.services import notifications
@@ -42,6 +42,7 @@ RULES: dict[str, dict] = {
     "authz_denied_burst": {"name": "Repeated permission denials", "kind": "suspicious_activity"},
     "remote_access_anomaly": {"name": "Suspicious remote access activity", "kind": "suspicious_activity"},
     "audit_integrity": {"name": "Audit log integrity check failed", "kind": "suspicious_activity"},
+    "phone_approval_refused": {"name": "Sign-in approval refused on phone", "kind": "suspicious_activity"},
     "audit_anchor_failed": {"name": "Audit anchor not written externally", "kind": "operational"},
 }
 
@@ -66,12 +67,21 @@ def raise_alert(db: Session, org_id: uuid.UUID, rule_key: str, *, title: str, de
         if escalated and severity in NOTIFY_AT:
             _notify(db, existing)
         return existing
-    if device_id and employee_id is None:
-        d = db.get(Device, device_id)
-        employee_id = d.employee_id if d else None
+    # Admin isolation: an alert belongs to the admin that owns the device/employee it is about (NULL = org-wide,
+    # e.g. an authentication alert not tied to a managed endpoint — visible to Super Admins).
+    owner_admin_id = None
+    dev = db.get(Device, device_id) if device_id else None
+    if dev is not None:
+        owner_admin_id = dev.owner_admin_id
+        if employee_id is None:
+            employee_id = dev.employee_id
+    if owner_admin_id is None and employee_id is not None:
+        emp = db.get(Employee, employee_id)
+        owner_admin_id = emp.owner_admin_id if emp else None
     a = SecurityAlert(id=uuid.uuid4(), organization_id=org_id, rule_key=rule_key, kind=RULES[rule_key]["kind"],
                       title=title[:200], description=description, severity=severity, device_id=device_id,
                       employee_id=employee_id, subject_user_id=subject_user_id, subject_label=subject_label,
+                      owner_admin_id=owner_admin_id,
                       detected_at=now, last_seen_at=now, dedup_key=dedup_key[:200], evidence=evidence or {},
                       auto_resolvable=auto_resolvable)
     db.add(a)

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     app_name: str = "Antiquarian's Cage"
     public_base_url: str = "http://localhost:5173"
+    # Address phones use to reach the API (pairing QR). Defaults to PUBLIC_BASE_URL; in development set it to this
+    # machine's LAN address (e.g. http://192.168.1.20:8000) because a phone cannot reach "localhost".
+    phone_api_base_url: str | None = None
     expose_api_docs: bool = False
 
     database_url: str
@@ -98,6 +101,17 @@ class Settings(BaseSettings):
                 raise ValueError("DEVICE_CA_KEY_PASSPHRASE (>=24 chars) is required in production")
             if not self.agent_require_mtls:
                 raise ValueError("AGENT_REQUIRE_MTLS must be true in production")
+            if not self.public_base_url.startswith("https://"):
+                raise ValueError("PUBLIC_BASE_URL must be https:// in production")
+            bad = [o for o in self.allowed_origins if not o.startswith("https://") or "localhost" in o or "127.0.0.1" in o]
+            if bad or not self.allowed_origins:
+                raise ValueError(f"ALLOWED_ORIGINS must be https and not localhost in production (got {bad or 'none'})")
+            if self.database_url.startswith("sqlite"):
+                raise ValueError("SQLite is not supported in production; use PostgreSQL")
+            from urllib.parse import urlparse
+            api_user = urlparse(self.database_url).username
+            if self.migration_database_url and api_user and api_user == urlparse(self.migration_database_url).username:
+                raise ValueError("the API must not connect as the schema owner; use the least-privilege role in DATABASE_URL")
         if not self.device_ca_key_passphrase:
             # Development/test only: derive a passphrase so the auto-created dev CA key is never stored in clear.
             import hashlib

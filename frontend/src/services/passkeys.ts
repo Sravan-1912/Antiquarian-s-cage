@@ -16,6 +16,16 @@ export async function registerPasskey(name: string): Promise<void> {
   await api.post('/auth/passkeys/register/verify', { challenge_id, credential, name })
 }
 
+/**
+ * Passwordless onboarding/recovery: register the first passkey using a single-use token (from bootstrap, an invite,
+ * or an admin-issued recovery link) with no prior session. On success the server signs the user in.
+ */
+export async function enrolPasskey(token: string, name: string): Promise<void> {
+  const { challenge_id, options } = await api.post<{ challenge_id: string; options: Parameters<typeof startRegistration>[0]['optionsJSON'] }>('/auth/enroll/options', { token })
+  const credential = await startRegistration({ optionsJSON: options })
+  await api.post('/auth/enroll/verify', { token, challenge_id, credential, name })
+}
+
 /** Post-login destination for SSO. Only our own OIDC authorize endpoint is allowed — never an arbitrary URL. */
 export function safeNext(next: string | null): string | null {
   if (!next) return null

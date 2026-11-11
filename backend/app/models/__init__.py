@@ -21,6 +21,8 @@ from app.models.endpoints import (
     EnrollmentToken,
 )
 from app.models.operations import AuditAnchor, AuditLog, Notification
+from app.models.billing import Subscription, SubscriptionPlan
+from app.models.phone import PhoneAuthenticator, PhoneLoginRequest, PhonePairing, WindowsUnlockKey
 from app.models.remote import RemoteSession
 from app.models.secops import AlertEvent, EmailOutbox, NotificationPreference, SecurityAlert
 from app.models.sso import (
@@ -49,5 +51,5 @@ __all__ = [
     "DeviceEvent", "AgentVersion", "EndpointPolicy", "PolicyRevision", "PolicyAssignment", "CommandJob",
     "PolicyDeployment", "ComplianceCheckSetting", "ComplianceEvaluation", "ComplianceResult",
     "RemoteSession", "Application", "ApplicationAssignment", "OIDCAuthorizationCode", "WebAuthnChallenge",
-    "WebAuthnCredential", "SecurityAlert", "AlertEvent", "NotificationPreference", "EmailOutbox",
+    "WebAuthnCredential", "SecurityAlert", "AlertEvent", "NotificationPreference", "EmailOutbox", "PhoneAuthenticator", "PhoneLoginRequest", "PhonePairing", "WindowsUnlockKey", "Subscription", "SubscriptionPlan",
 ]

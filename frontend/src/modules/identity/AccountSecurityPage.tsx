@@ -1,88 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import QRCode from 'qrcode'
 import { Monitor } from 'lucide-react'
 import { Alert, Badge, Button, Card, CardHeader, Field, Input, PageHeader, Spinner, Table, Td, Th } from '@/components/ui/primitives'
-import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
 import { describePasskeyError, passkeysSupported, registerPasskey } from '@/services/passkeys'
+import { PhoneCard } from './PhoneCard'
 import type { AuthEvent, SessionItem } from '@/types/api'
 import { describeUserAgent, formatDateTime } from '@/utils/format'
-
-function MfaCard() {
-  const { me, refresh } = useAuth()
-  const [setup, setSetup] = useState<{ secret: string; otpauth_uri: string } | null>(null)
-  const [qr, setQr] = useState<string | null>(null)
-  const [code, setCode] = useState('')
-  const [password, setPassword] = useState('')
-  const [msg, setMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
-
-  useEffect(() => {
-    // QR rendered locally; the secret never leaves the browser to a third-party service.
-    if (setup) QRCode.toDataURL(setup.otpauth_uri, { margin: 1, width: 176, color: { dark: '#0d0e10', light: '#eceef0' } }).then(setQr)
-  }, [setup])
-
-  const begin = useMutation({ mutationFn: () => api.post<{ secret: string; otpauth_uri: string }>('/auth/mfa/setup'), onSuccess: setSetup,
-    onError: (e) => setMsg({ tone: 'danger', text: describeError(e) }) })
-  const enable = useMutation({ mutationFn: () => api.post('/auth/mfa/enable', { code }),
-    onSuccess: async () => { setSetup(null); setCode(''); setMsg({ tone: 'success', text: 'MFA enabled. You will be asked for a code at every sign-in.' }); await refresh() },
-    onError: (e) => setMsg({ tone: 'danger', text: describeError(e) }) })
-  const disable = useMutation({ mutationFn: () => api.post('/auth/mfa/disable', { code, password }),
-    onSuccess: async () => { setCode(''); setPassword(''); setMsg({ tone: 'success', text: 'MFA disabled.' }); await refresh() },
-    onError: (e) => setMsg({ tone: 'danger', text: describeError(e) }) })
-
-  return (
-    <Card>
-      <CardHeader title="Multi-factor authentication" description="Time-based one-time codes (RFC 6238) from an authenticator app."
-        action={me?.mfa_enabled ? <Badge tone="success">Enabled</Badge> : <Badge tone="warning">Not enabled</Badge>} />
-      <div className="space-y-3 p-4">
-        {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
-        {me?.mfa_enabled ? (
-          <form onSubmit={(e: FormEvent) => { e.preventDefault(); disable.mutate() }} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-            <Field label="Current password" htmlFor="mpw"><Input id="mpw" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-            <Field label="Authentication code" htmlFor="mcode"><Input id="mcode" inputMode="numeric" required maxLength={8} className="font-mono" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
-            <Button type="submit" variant="danger" loading={disable.isPending}>Disable MFA</Button>
-          </form>
-        ) : setup ? (
-          <div className="grid gap-4 sm:grid-cols-[auto_1fr]">
-            <div className="rounded-md bg-silver-50 p-1.5">{qr ? <img src={qr} alt="Authenticator QR code" className="size-44" /> : <div className="grid size-44 place-items-center"><Spinner /></div>}</div>
-            <form onSubmit={(e: FormEvent) => { e.preventDefault(); enable.mutate() }} className="space-y-3">
-              <p className="text-sm text-silver-400">Scan the code with your authenticator app, or enter this key manually:</p>
-              <code className="block break-all rounded bg-ink-800 px-2 py-1.5 font-mono text-xs text-silver-100">{setup.secret.match(/.{1,4}/g)?.join(' ')}</code>
-              <Field label="Enter the 6-digit code to confirm" htmlFor="ecode"><Input id="ecode" inputMode="numeric" required maxLength={8} className="font-mono tracking-widest" value={code} onChange={(e) => setCode(e.target.value)} autoFocus /></Field>
-              <div className="flex gap-2"><Button type="submit" loading={enable.isPending}>Enable MFA</Button><Button type="button" variant="ghost" onClick={() => setSetup(null)}>Cancel</Button></div>
-            </form>
-          </div>
-        ) : (
-          <Button onClick={() => { setMsg(null); begin.mutate() }} loading={begin.isPending}>Set up authenticator app</Button>
-        )}
-      </div>
-    </Card>
-  )
-}
-
-function PasswordCard() {
-  const [f, setF] = useState({ current_password: '', new_password: '', confirm: '' })
-  const [msg, setMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
-  const qc = useQueryClient()
-  const m = useMutation({ mutationFn: () => api.post<{ detail: string }>('/auth/password/change', { current_password: f.current_password, new_password: f.new_password }),
-    onSuccess: (r) => { setMsg({ tone: 'success', text: r.detail }); setF({ current_password: '', new_password: '', confirm: '' }); qc.invalidateQueries({ queryKey: ['sessions'] }) },
-    onError: (e) => setMsg({ tone: 'danger', text: describeError(e) }) })
-  return (
-    <Card>
-      <CardHeader title="Password" description="Changing your password signs out every other session." />
-      <form className="space-y-3 p-4" onSubmit={(e) => { e.preventDefault(); if (f.new_password !== f.confirm) setMsg({ tone: 'danger', text: 'Passwords do not match.' }); else m.mutate() }}>
-        {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Current password" htmlFor="cp"><Input id="cp" type="password" required autoComplete="current-password" value={f.current_password} onChange={(e) => setF({ ...f, current_password: e.target.value })} /></Field>
-          <Field label="New password" htmlFor="np"><Input id="np" type="password" required minLength={12} autoComplete="new-password" value={f.new_password} onChange={(e) => setF({ ...f, new_password: e.target.value })} /></Field>
-          <Field label="Confirm new password" htmlFor="np2"><Input id="np2" type="password" required autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} /></Field>
-        </div>
-        <Button type="submit" loading={m.isPending}>Change password</Button>
-      </form>
-    </Card>
-  )
-}
 
 function SessionsCard() {
   const qc = useQueryClient()
@@ -212,9 +136,8 @@ export function AccountSecurityPage() {
   return (
     <div className="animate-fade-in space-y-4">
       <PageHeader title="Security settings" description="Manage how you sign in." />
+      <PhoneCard />
       <PasskeysCard />
-      <MfaCard />
-      <PasswordCard />
       <NotificationPrefsCard />
       <SessionsCard />
       <HistoryCard />

@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, require_permission
@@ -13,7 +13,7 @@ from app.models import Role, User, UserRole
 from app.schemas.admin import AdminUserOut, InviteAdminRequest, RoleDetail, SetRolesRequest
 from app.schemas.common import Message
 from app.security.permissions import PRIVILEGED_ROLE
-from app.services import audit, auth, email, notifications, rbac
+from app.services import audit, auth, email, notifications, rbac, tenancy
 from app.services.email import EmailDeliveryError
 
 router = APIRouter(prefix="/users", tags=["administrators"])
@@ -33,9 +33,11 @@ def _active_super_admins(db: Session, org_id: uuid.UUID) -> list[User]:
 
 @router.get("", response_model=list[AdminUserOut])
 def list_admins(ctx: AuthContext = Depends(require_permission("users:read")), db: Session = Depends(get_db)):
-    users = db.scalars(
-        select(User).where(User.organization_id == ctx.user.organization_id).order_by(User.created_at)
-    ).all()
+    stmt = select(User).where(User.organization_id == ctx.user.organization_id).order_by(User.created_at)
+    scope = tenancy.scope_admin_id(ctx)
+    if scope is not None:  # an admin sees their own staff and themselves, never other admins or a super admin
+        stmt = stmt.where(or_(User.owner_admin_id == scope, User.id == scope))
+    users = db.scalars(stmt).all()
     return [u for u in users if any(r.key != "employee" for r in u.roles)]  # employee portal accounts live on Employees
 
 
@@ -55,8 +57,11 @@ def invite_admin(body: InviteAdminRequest, ctx: AuthContext = Depends(require_pe
     role = rbac.get_role(db, body.role)
     if role is None:
         raise HTTPException(422, "Unknown role")
-    user = User(organization_id=org_id, email=str(body.email).lower(), full_name=body.full_name,
-                password_hash=None, status="pending")
+    # Only a Super Admin (global) may create admins or super admins; an admin only creates staff inside its tenant.
+    if not tenancy.is_global(ctx) and body.role in ("super_admin", "admin"):
+        raise HTTPException(403, "Only a Super Admin can create administrator accounts")
+    user = User(organization_id=org_id, owner_admin_id=tenancy.owner_for(ctx), email=str(body.email).lower(),
+                full_name=body.full_name, status="pending")
     db.add(user)
     db.flush()
     db.add(UserRole(user_id=user.id, role_id=role.id, granted_by=ctx.user.id))
@@ -89,6 +94,27 @@ def resend_invite(user_id: uuid.UUID, ctx: AuthContext = Depends(require_permiss
     except EmailDeliveryError:
         raise HTTPException(502, "The invitation email could not be sent")
     return Message(detail="Invitation resent")
+
+
+@router.post("/{user_id}/recovery", response_model=Message)
+def issue_passkey_recovery(user_id: uuid.UUID, ctx: AuthContext = Depends(require_permission("users:manage")),
+                           db: Session = Depends(get_db)):
+    """Admin-issued passkey recovery (replaces password reset): a single-use link that lets the user register a fresh
+    passkey. Any existing passkeys are revoked when the new one is enrolled."""
+    user = _get(db, ctx, user_id)
+    if user.status == "disabled":
+        raise HTTPException(409, "Re-enable the account before issuing recovery")
+    raw = auth.issue_recovery(db, user)
+    audit.record(db, user.organization_id, ctx.actor, "user.recovery_issued", target_type="user", target_id=user.id,
+                 target_label=user.email)
+    db.commit()
+    try:
+        email.send_email(user.email, "Recover access to Antiquarian's Cage",
+                         f"Hello {user.full_name},\n\n{ctx.user.full_name} issued a recovery link so you can register "
+                         f"a new passkey. It is valid for 1 hour and can be used once:\n{email.link('/recover', raw)}")
+    except EmailDeliveryError:
+        raise HTTPException(502, "Recovery link created, but the email could not be sent. Resend it later.")
+    return Message(detail="Recovery link sent")
 
 
 @router.put("/{user_id}/roles", response_model=AdminUserOut)

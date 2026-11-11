@@ -48,11 +48,17 @@ ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.
                      "account.enable", "account.remove_admin"]
 
 
+class StepUp(BaseModel):
+    """A fresh passkey assertion confirming a sensitive action (from /auth/step-up/options)."""
+    challenge_id: uuid.UUID
+    credential: dict
+
+
 class ActionRequest(BaseModel):
     command: ActionName
     parameters: dict = Field(default_factory=dict)
     reason: str = Field(min_length=3, max_length=500)
-    confirm_password: str | None = Field(default=None, max_length=256)
+    step_up: StepUp | None = None
 
 
 class ActionOut(ORMModel):
@@ -73,7 +79,7 @@ class ActionOut(ORMModel):
 class AssistRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
     max_minutes: int = Field(default=30, ge=5, le=120)
-    confirm_password: str = Field(min_length=1, max_length=256)
+    step_up: StepUp | None = None
 
 
 class TerminateRequest(BaseModel):
