@@ -3,9 +3,13 @@
 Endpoint management and workforce security platform: employee identity, Windows endpoint
 administration (agent), security policy & compliance, and tamper-evident security operations.
 
-> **Status: Phases 1–9 implemented** (foundation, endpoint management, security policies + compliance, remote
-> administration, identity security, security operations, hardening, the Cage
-> Authenticator Android app, fleet overview with real network usage). Phase 10 (Windows sign-in approved from the phone) is built and tested
+> **New here? Read [`documentation/00-complete-guide.md`](documentation/00-complete-guide.md)** — one page covering what
+> the system is, all phases, how to run/test/operate it, and the passkey-only sign-in end to end.
+
+> **Status: Phases 1–12 implemented, Phase 13 (passkey-only auth) implemented** (foundation, endpoint management,
+> security policies + compliance, remote administration, identity security, security operations, hardening, the Cage
+> Authenticator Android app, fleet overview with real network usage, admin isolation, subscription/device quotas,
+> passkey-only authentication). Phase 10 (Windows sign-in approved from the phone) is built and tested
 > off the lock screen; it still has to be verified on a Windows 10/11 test VM (`documentation/12-windows-phone-unlock.md`). What has actually been verified is in
 > `documentation/test-log.md`; operating procedures are in `documentation/10-operations-runbook.md`.
 >
