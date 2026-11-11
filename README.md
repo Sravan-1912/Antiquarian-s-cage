@@ -4,17 +4,21 @@ Endpoint management and workforce security platform: employee identity, Windows 
 administration (agent), security policy & compliance, and tamper-evident security operations.
 
 > **Status: Phases 1–9 implemented** (foundation, endpoint management, security policies + compliance, remote
-> administration, identity security, security operations, hardening, phone-approval sign-in with the Cage
+> administration, identity security, security operations, hardening, the Cage
 > Authenticator Android app, fleet overview with real network usage). Phase 10 (Windows sign-in approved from the phone) is built and tested
 > off the lock screen; it still has to be verified on a Windows 10/11 test VM (`documentation/12-windows-phone-unlock.md`). What has actually been verified is in
 > `documentation/test-log.md`; operating procedures are in `documentation/10-operations-runbook.md`.
+>
+> **Console sign-in is passkey-only** (WebAuthn, user-verification required). There are no passwords or TOTP: bootstrap,
+> invitation and admin-issued recovery each run a single-use token → passkey registration ceremony, and a break-glass CLI
+> (`python -m app.recover <email>`) recovers a sole Super Admin. See `documentation/08-identity-and-sso.md`.
 
 ## Repository layout
 
 ```
 backend/          FastAPI + SQLAlchemy 2 + Alembic (Python 3.13+)
   app/core/       config, DB, logging, security headers, rate limiting
-  app/security/   Argon2id, AES-256-GCM, TOTP, tokens, permission catalogue
+  app/security/   WebAuthn passkeys, AES-256-GCM, tokens, permission catalogue
   app/models/     ORM models          app/services/  business logic + audit
   app/api/        routers (thin)      app/schemas/   Pydantic models
   migrations/     Alembic migrations  tests/         pytest suite
@@ -29,15 +33,15 @@ agent/            Windows endpoint agent (Python, separate from the backend) —
 | Area | What works |
 |---|---|
 | Bootstrap | First-run organisation + Super Admin registration; closes automatically once a user exists |
-| Authentication | Email verification, login, logout, password reset, change password, invitation acceptance |
-| MFA | TOTP (RFC 6238) with locally rendered QR, replay protection, AES-256-GCM-encrypted secrets |
+| Authentication | **Passkey-only** (WebAuthn, user-verification required — no passwords anywhere). Passwordless bootstrap, invitation and admin-issued recovery each run a single-use token → passkey registration ceremony; logout; break-glass CLI (`python -m app.recover`) |
+| MFA | Not a separate step: a passkey with user verification already combines possession + biometric/PIN, so it satisfies MFA on its own (TOTP removed) |
 | Sessions | Opaque server-side sessions (hashed), idle + absolute expiry, list/revoke, revoke others |
 | Brute force | Per-IP rate limits, per-account lockout, lockout notifications, uniform error responses |
 | RBAC | 23 permissions, 5 built-in roles, enforced in backend dependencies; denials audited |
 | Administrators | Invite, change role, disable/enable, unlock, revoke sessions; last Super Admin protected |
 | Employees | Create, edit, joiner/mover/leaver workflows, suspend/reactivate/offboard, history, CSV export |
 | Audit | Append-only hash chain + HMAC, integrity verification, filters, CSV export, PG trigger blocks UPDATE/DELETE |
-| Dashboard | Real DB aggregates: workforce, sign-ins, MFA coverage, departments, joiners, activity timeline |
+| Dashboard | Real DB aggregates: workforce, sign-ins, passkey coverage, departments, joiners, activity timeline |
 | Shell | Sidebar, global search (Ctrl K, permission-filtered), notification centre, profile menu |
 
 ## Phase 2 features (implemented)
@@ -70,7 +74,7 @@ See `documentation/06-policy-recovery.md` for rollback and manual recovery per p
 
 | Area | What works |
 |---|---|
-| Remote actions | Status inspection, lock, restart (warned, cancellable), cancel restart, disable/enable local account, remove from Administrators — signed, allowlisted, schema-checked by server, agent and broker; password re-entry for sensitive actions; last-admin protection |
+| Remote actions | Status inspection, lock, restart (warned, cancellable), cancel restart, disable/enable local account, remove from Administrators — signed, allowlisted, schema-checked by server, agent and broker; a fresh passkey confirmation (step-up) for sensitive actions; last-admin protection |
 | Remote assistance | Consent prompt by default (auto-decline), always-on-top indicator with End button, Quick Assist launched only after consent, maximum duration, termination from either side, server + endpoint expiry, verified cleanup with privileged fallback, full audit trail |
 | Console | Remote administration panel and local-accounts view per endpoint, action and session history, Remote sessions page, organisation remote-assistance policy (consent, max duration, IT Support access) |
 
@@ -81,7 +85,7 @@ Details and limitations: `documentation/07-remote-administration.md`.
 | Area | What works |
 |---|---|
 | Employee accounts | Workspace invitation (Employee role), My workspace (apps + devices), suspend/reactivate, leaver revokes sessions, SSO grants and passkeys |
-| Passkeys | WebAuthn registration/sign-in (usernameless, user verification required, counts as MFA), naming, removal, admin revocation |
+| Passkeys | **The only console sign-in.** WebAuthn registration/sign-in (usernameless, user verification required, satisfies MFA), naming, removal, admin revocation, rate-limited sign-in |
 | SSO (OIDC provider) | Discovery, JWKS, authorization code + mandatory PKCE, RS256 ID/access tokens, userinfo, per-app MFA step-up, exact redirect matching, assignment checks at every step, authentication events per app |
 | Applications | Register confidential/public clients, secret shown once and stored hashed, rotation, enable/disable, assignments, "verified" only after a real sign-in |
 
@@ -114,8 +118,8 @@ Details: `documentation/09-security-operations.md`.
 
 | Area | What works |
 |---|---|
-| Phone sign-in | "Sign in with your phone": number matching + fingerprint/face-bound key signature, decoys for unknown emails, alerts on denial — `documentation/11-phone-sign-in-and-fleet-overview.md` |
-| Cage Authenticator | Expo/React Native app in `mobile/`; signed Android APK built locally (`mobile/build-android.ps1`); iOS project config ready, `.ipa` needs a Mac/EAS |
+| Phone sign-in | _Console phone-approval sign-in was removed with the move to passkey-only._ A phone is still a first-class console passkey via standard WebAuthn (platform or cross-device/hybrid). The paired Cage Authenticator now covers Windows laptop unlock only — `documentation/12-windows-phone-unlock.md` |
+| Cage Authenticator | Expo/React Native app in `mobile/`; signed Android APK built locally (`mobile/build-android.ps1`); iOS project config ready, `.ipa` needs a Mac/EAS. Pairs a biometric-bound key for Windows laptop unlock |
 | Fleet overview | Health chip, users/devices/policies cards, platform and last-contact rings, network usage from agent byte counters |
 
 ## Local development

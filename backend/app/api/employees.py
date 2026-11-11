@@ -282,7 +282,7 @@ def grant_portal_access(emp_id: uuid.UUID, ctx: AuthContext = Depends(require_pe
     if auth.find_user_by_email(db, emp.organization_id, emp.email):
         raise HTTPException(409, "An account with this email already exists (administrator accounts cannot be reused)")
     user = User(organization_id=emp.organization_id, email=emp.email.lower(), full_name=emp.full_name,
-                password_hash=None, status="pending")
+                status="pending")
     db.add(user)
     db.flush()
     role = rbac.get_role(db, "employee")

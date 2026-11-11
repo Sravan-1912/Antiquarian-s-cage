@@ -156,6 +156,9 @@ def authenticate(db: Session, challenge_id: uuid.UUID, credential: dict, client:
         audit.record(db, user.organization_id, Actor("user", None, user.email, client.ip), "auth.login",
                      target_type="user", target_id=user.id, target_label=user.email, result="failure",
                      metadata={"method": "passkey", "reason": str(exc)[:200]})
+        db.flush()
+        from app.services import alerts
+        alerts.on_failed_login(db, user.organization_id, user.email, user, client.ip)  # feeds failed-sign-in rules
         db.commit()
         raise generic from exc
     if user.status != "active":
@@ -181,6 +184,52 @@ def revoke(db: Session, cred: WebAuthnCredential, actor: Actor, by_user_id: uuid
     audit.record(db, user.organization_id, actor, "auth.passkey_revoked", target_type="user", target_id=user.id,
                  target_label=user.email, metadata={"credential": str(cred.id), "name": cred.name})
     db.commit()
+
+
+def verify_step_up(db: Session, user: User, challenge_id: uuid.UUID, credential: dict, client: ClientInfo) -> bool:
+    """Fresh-passkey confirmation for a sensitive action (replaces re-entering a password). Verifies an assertion from
+    one of THIS user's passkeys against a challenge issued to them; no session is created. Returns True on success."""
+    rp_id, _, origin = rp()
+    try:
+        expected = _consume(db, challenge_id, "step_up", user.id)
+    except AuthError:
+        return False
+    from webauthn.helpers import base64url_to_bytes
+    try:
+        cred_id = base64url_to_bytes(credential.get("rawId") or credential.get("id") or "")
+    except ValueError:
+        db.commit()
+        return False
+    cred = db.scalar(select(WebAuthnCredential).where(WebAuthnCredential.credential_id == cred_id,
+                                                      WebAuthnCredential.user_id == user.id,
+                                                      WebAuthnCredential.revoked_at.is_(None)))
+    if cred is None:
+        db.commit()
+        return False
+    try:
+        v = verify_authentication_response(credential=credential, expected_challenge=expected, expected_rp_id=rp_id,
+                                           expected_origin=origin, credential_public_key=cred.public_key,
+                                           credential_current_sign_count=cred.sign_count,
+                                           require_user_verification=True)
+    except InvalidAuthenticationResponse:
+        db.commit()
+        return False
+    cred.sign_count = v.new_sign_count
+    cred.last_used_at = utcnow()
+    db.flush()
+    return True
+
+
+def step_up_options(db: Session, user: User) -> tuple[uuid.UUID, dict]:
+    """Assertion options for a step-up challenge bound to the signed-in user."""
+    rp_id, _, _ = rp()
+    opts = generate_authentication_options(rp_id=rp_id, challenge=secrets.token_bytes(32), timeout=120_000,
+                                           user_verification=UserVerificationRequirement.REQUIRED,
+                                           allow_credentials=[PublicKeyCredentialDescriptor(id=c.credential_id)
+                                                              for c in active_credentials(db, user.id)])
+    ch = _new_challenge(db, "step_up", user.id, opts.challenge)
+    db.commit()
+    return ch.id, json.loads(options_to_json(opts))
 
 
 def revoke_all(db: Session, user: User, actor: Actor) -> int:

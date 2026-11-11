@@ -2,14 +2,12 @@
 Admin can raise the limit by assigning a plan."""
 from __future__ import annotations
 
-from tests.conftest import STRONG, bootstrap_admin, csrf, last_token, login
+from tests.conftest import bootstrap_admin, csrf, invite_and_accept, login
 from tests.test_endpoints import FakeAgent
 
 
 def _invite_admin(client, outbox, email):
-    assert client.post("/api/v1/users", json={"email": email, "full_name": "Ad Min", "role": "admin"},
-                       headers=csrf(client)).status_code == 201
-    client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+    invite_and_accept(client, outbox, email, "admin", full_name="Ad Min")
 
 
 def _token(client):

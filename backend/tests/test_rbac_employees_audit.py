@@ -1,18 +1,13 @@
 from sqlalchemy import text
 
-from tests.conftest import STRONG, bootstrap_admin, csrf, last_token, login
+from tests.conftest import bootstrap_admin, csrf, invite_and_accept, login
 
 EMP = {"employee_number": "E-1001", "full_name": "Grace Hopper", "email": "grace@example.com",
        "department": "Engineering", "job_title": "Engineer"}
 
 
 def _invite(client, outbox, email_addr: str, role: str) -> None:
-    r = client.post("/api/v1/users", json={"email": email_addr, "full_name": "Test Person", "role": role},
-                    headers=csrf(client))
-    assert r.status_code == 201, r.text
-    token = last_token(outbox, "/accept-invite")
-    r = client.post("/api/v1/auth/invite/accept", json={"token": token, "password": STRONG})
-    assert r.status_code == 200, r.text
+    invite_and_accept(client, outbox, email_addr, role, full_name="Test Person")
 
 
 def test_rbac_matrix_enforced_by_backend(client, outbox):

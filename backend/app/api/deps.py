@@ -58,12 +58,6 @@ def _session(request: Request, db: Session) -> tuple[UserSession, User]:
     return sess, user
 
 
-def pending_mfa_context(request: Request, db: Session = Depends(get_db)) -> AuthContext:
-    """Session that has passed the password step (MFA may still be pending)."""
-    sess, user = _session(request, db)
-    return AuthContext(user, sess, client_info(request))
-
-
 def current_context(request: Request, db: Session = Depends(get_db)) -> AuthContext:
     sess, user = _session(request, db)
     if not sess.mfa_verified:

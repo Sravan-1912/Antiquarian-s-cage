@@ -61,7 +61,7 @@ def invite_admin(body: InviteAdminRequest, ctx: AuthContext = Depends(require_pe
     if not tenancy.is_global(ctx) and body.role in ("super_admin", "admin"):
         raise HTTPException(403, "Only a Super Admin can create administrator accounts")
     user = User(organization_id=org_id, owner_admin_id=tenancy.owner_for(ctx), email=str(body.email).lower(),
-                full_name=body.full_name, password_hash=None, status="pending")
+                full_name=body.full_name, status="pending")
     db.add(user)
     db.flush()
     db.add(UserRole(user_id=user.id, role_id=role.id, granted_by=ctx.user.id))

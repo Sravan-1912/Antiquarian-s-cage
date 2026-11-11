@@ -8,7 +8,6 @@ export interface Me {
   organization_name: string
   roles: Role[]
   permissions: string[]
-  mfa_enabled: boolean
   email_verified: boolean
   last_login_at: string | null
 }
@@ -47,7 +46,6 @@ export interface AdminUser {
   email: string
   full_name: string
   status: 'pending' | 'active' | 'disabled'
-  mfa_enabled: boolean
   email_verified_at: string | null
   last_login_at: string | null
   locked_until: string | null
@@ -154,7 +152,7 @@ export interface DashboardSummary {
     locked_accounts: number
     logins_by_day: { date: string; success: number; failure: number }[]
   }
-  administrators: { total: number; active: number; mfa_enabled: number; online: number }
+  administrators: { total: number; active: number; with_passkey: number; online: number }
   endpoints: ModuleStatus | EndpointSummary
   compliance: ModuleStatus | ComplianceDash
   policies: ModuleStatus | PolicyDash

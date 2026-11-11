@@ -244,8 +244,8 @@ export function DashboardPage() {
         <Kpi label="Offboarded" value={d.employees.offboarded} icon={UserCheck} />
         <Kpi label="Failed sign-ins (24h)" value={d.authentication.failed_logins_24h} icon={ShieldAlert} tone={d.authentication.failed_logins_24h ? 'warn' : undefined} />
         <Kpi label="Locked accounts" value={d.authentication.locked_accounts} icon={KeyRound} tone={d.authentication.locked_accounts ? 'warn' : undefined} />
-        <Kpi label="Admins with MFA" value={`${d.administrators.mfa_enabled}/${d.administrators.active}`} icon={ShieldCheck}
-          tone={d.administrators.mfa_enabled < d.administrators.active ? 'warn' : undefined} hint="Active administrator accounts" />
+        <Kpi label="Admins with a passkey" value={`${d.administrators.with_passkey}/${d.administrators.active}`} icon={ShieldCheck}
+          tone={d.administrators.with_passkey < d.administrators.active ? 'warn' : undefined} hint="Active administrator accounts" />
       </div>
 
       <div className="grid gap-3 xl:grid-cols-3">

@@ -32,7 +32,7 @@
           "auth"
         ],
         "summary": "Register",
-        "description": "Creates the first Super Admin. Closed once any user exists; further admins are invited.",
+        "description": "Create the first Super Admin (passwordless). Closed once any user exists; further admins are invited. Returns\na single-use enrol token the browser uses to register the first passkey via /auth/enroll/*.",
         "operationId": "register_api_v1_auth_register_post",
         "requestBody": {
           "content": {
@@ -50,7 +50,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message"
+                  "$ref": "#/components/schemas/RegisterResponse"
                 }
               }
             }
@@ -68,18 +68,19 @@
         }
       }
     },
-    "/api/v1/auth/verify-email": {
+    "/api/v1/auth/enroll/options": {
       "post": {
         "tags": [
           "auth"
         ],
-        "summary": "Verify Email",
-        "operationId": "verify_email_api_v1_auth_verify_email_post",
+        "summary": "Enroll Options",
+        "description": "Registration-ceremony options for a passwordless enrol/invite/recovery token (no session needed).",
+        "operationId": "enroll_options_api_v1_auth_enroll_options_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TokenRequest"
+                "$ref": "#/components/schemas/EnrollOptionsRequest"
               }
             }
           },
@@ -90,9 +91,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
+                "schema": {}
               }
             }
           },
@@ -109,18 +108,19 @@
         }
       }
     },
-    "/api/v1/auth/login": {
+    "/api/v1/auth/enroll/verify": {
       "post": {
         "tags": [
           "auth"
         ],
-        "summary": "Login",
-        "operationId": "login_api_v1_auth_login_post",
+        "summary": "Enroll Verify",
+        "description": "Register the passkey, activate the account, and sign in. Replaces password set-up for bootstrap/invite/recovery.",
+        "operationId": "enroll_verify_api_v1_auth_enroll_verify_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
+                "$ref": "#/components/schemas/EnrollVerifyRequest"
               }
             }
           },
@@ -150,41 +150,20 @@
         }
       }
     },
-    "/api/v1/auth/mfa/verify": {
+    "/api/v1/auth/step-up/options": {
       "post": {
         "tags": [
           "auth"
         ],
-        "summary": "Mfa Verify",
-        "operationId": "mfa_verify_api_v1_auth_mfa_verify_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MfaCode"
-              }
-            }
-          },
-          "required": true
-        },
+        "summary": "Step Up Options",
+        "description": "Assertion options for a fresh-passkey confirmation of a sensitive action (e.g. a remote command).",
+        "operationId": "step_up_options_api_v1_auth_step_up_options_post",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
+                "schema": {}
               }
             }
           }
@@ -212,170 +191,6 @@
         }
       }
     },
-    "/api/v1/auth/password/forgot": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Forgot Password",
-        "operationId": "forgot_password_api_v1_auth_password_forgot_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ForgotPasswordRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/password/reset": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Reset Password",
-        "operationId": "reset_password_api_v1_auth_password_reset_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResetPasswordRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/invite/accept": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Accept Invite",
-        "operationId": "accept_invite_api_v1_auth_invite_accept_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AcceptInviteRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/password/change": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Change Password",
-        "operationId": "change_password_api_v1_auth_password_change_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChangePasswordRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/auth/me": {
       "get": {
         "tags": [
@@ -390,109 +205,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MeResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/mfa/setup": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Mfa Setup",
-        "operationId": "mfa_setup_api_v1_auth_mfa_setup_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MfaSetupResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/mfa/enable": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Mfa Enable",
-        "operationId": "mfa_enable_api_v1_auth_mfa_enable_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MfaCode"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/mfa/disable": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Mfa Disable",
-        "operationId": "mfa_disable_api_v1_auth_mfa_disable_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MfaDisableRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -710,6 +422,50 @@
         ],
         "summary": "Resend Invite",
         "operationId": "resend_invite_api_v1_users__user_id__resend_invite_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/recovery": {
+      "post": {
+        "tags": [
+          "administrators"
+        ],
+        "summary": "Issue Passkey Recovery",
+        "description": "Admin-issued passkey recovery (replaces password reset): a single-use link that lets the user register a fresh\npasskey. Any existing passkeys are revoked when the new one is enrolled.",
+        "operationId": "issue_passkey_recovery_api_v1_users__user_id__recovery_post",
         "parameters": [
           {
             "name": "user_id",
@@ -3624,6 +3380,59 @@
         }
       }
     },
+    "/api/v1/devices/{device_id}/network": {
+      "get": {
+        "tags": [
+          "endpoints"
+        ],
+        "summary": "Device Network",
+        "operationId": "device_network_api_v1_devices__device_id__network_get",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Device Id"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 720,
+              "minimum": 1,
+              "default": 24,
+              "title": "Hours"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/devices/{device_id}/heartbeats": {
       "get": {
         "tags": [
@@ -5430,6 +5239,595 @@
         }
       }
     },
+    "/api/v1/me/phone-authenticators": {
+      "get": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "My Phones",
+        "operationId": "my_phones_api_v1_me_phone_authenticators_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/phone-authenticators/pairing": {
+      "post": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "Start Pairing",
+        "operationId": "start_pairing_api_v1_me_phone_authenticators_pairing_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/phone-authenticators/{aid}": {
+      "delete": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "Remove Phone",
+        "operationId": "remove_phone_api_v1_me_phone_authenticators__aid__delete",
+        "parameters": [
+          {
+            "name": "aid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Aid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/phone-authenticators": {
+      "get": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "Admin List",
+        "operationId": "admin_list_api_v1_users__user_id__phone_authenticators_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/phone-authenticators/{aid}": {
+      "delete": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "Admin Remove",
+        "operationId": "admin_remove_api_v1_users__user_id__phone_authenticators__aid__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "aid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Aid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authenticator/pair": {
+      "post": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "App Pair",
+        "operationId": "app_pair_api_v1_authenticator_pair_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authenticator/pending": {
+      "post": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "App Pending",
+        "operationId": "app_pending_api_v1_authenticator_pending_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppAuth"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authenticator/decide": {
+      "post": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "App Decide",
+        "operationId": "app_decide_api_v1_authenticator_decide_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/windows-unlock": {
+      "get": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "My Windows Unlock",
+        "operationId": "my_windows_unlock_api_v1_me_windows_unlock_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/windows-unlock/{kid}": {
+      "delete": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "Remove My Windows Unlock",
+        "operationId": "remove_my_windows_unlock_api_v1_me_windows_unlock__kid__delete",
+        "parameters": [
+          {
+            "name": "kid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Kid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{device_id}/windows-unlock": {
+      "get": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "Device Windows Unlock",
+        "operationId": "device_windows_unlock_api_v1_devices__device_id__windows_unlock_get",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Device Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{device_id}/windows-unlock/{kid}": {
+      "delete": {
+        "tags": [
+          "phone authenticator"
+        ],
+        "summary": "Device Windows Unlock Remove",
+        "operationId": "device_windows_unlock_remove_api_v1_devices__device_id__windows_unlock__kid__delete",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Device Id"
+            }
+          },
+          {
+            "name": "kid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Kid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/subscription/plans": {
+      "get": {
+        "tags": [
+          "subscription"
+        ],
+        "summary": "Plans",
+        "operationId": "plans_api_v1_subscription_plans_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/subscription": {
+      "get": {
+        "tags": [
+          "subscription"
+        ],
+        "summary": "My Subscription",
+        "description": "The caller tenant's effective plan and device-slot usage (an admin sees their own; a Super Admin sees the\norganisation-level default tenant).",
+        "operationId": "my_subscription_api_v1_subscription_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/subscriptions": {
+      "get": {
+        "tags": [
+          "subscription"
+        ],
+        "summary": "All Subscriptions",
+        "description": "Super Admin: every admin's plan and usage, plus the organisation default.",
+        "operationId": "all_subscriptions_api_v1_subscriptions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organization/subscription": {
+      "put": {
+        "tags": [
+          "subscription"
+        ],
+        "summary": "Set Org Default",
+        "operationId": "set_org_default_api_v1_organization_subscription_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPlan"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admins/{admin_id}/subscription": {
+      "put": {
+        "tags": [
+          "subscription"
+        ],
+        "summary": "Set Admin Subscription",
+        "operationId": "set_admin_subscription_api_v1_admins__admin_id__subscription_put",
+        "parameters": [
+          {
+            "name": "admin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Admin Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPlan"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [
@@ -5633,32 +6031,49 @@
           }
         }
       }
+    },
+    "/agent/v1/unlock/start": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "summary": "Unlock Start",
+        "description": "Called by the agent on behalf of the local credential provider (lock screen).",
+        "operationId": "unlock_start_agent_v1_unlock_start_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/v1/unlock/status": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "summary": "Unlock Status",
+        "operationId": "unlock_status_agent_v1_unlock_status_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
-      "AcceptInviteRequest": {
-        "properties": {
-          "token": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 20,
-            "title": "Token"
-          },
-          "password": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Password"
-          }
-        },
-        "type": "object",
-        "required": [
-          "token",
-          "password"
-        ],
-        "title": "AcceptInviteRequest"
-      },
       "ActionOut": {
         "properties": {
           "id": {
@@ -5789,17 +6204,15 @@
             "minLength": 3,
             "title": "Reason"
           },
-          "confirm_password": {
+          "step_up": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 256
+                "$ref": "#/components/schemas/StepUp"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Confirm Password"
+            ]
           }
         },
         "type": "object",
@@ -5827,10 +6240,6 @@
           "status": {
             "type": "string",
             "title": "Status"
-          },
-          "mfa_enabled": {
-            "type": "boolean",
-            "title": "Mfa Enabled"
           },
           "email_verified_at": {
             "anyOf": [
@@ -5887,7 +6296,6 @@
           "email",
           "full_name",
           "status",
-          "mfa_enabled",
           "email_verified_at",
           "last_login_at",
           "locked_until",
@@ -6008,6 +6416,27 @@
           "problems"
         ],
         "title": "AnchorReportOut"
+      },
+      "AppAuth": {
+        "properties": {
+          "authenticator_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Authenticator Id"
+          },
+          "poll_secret": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 20,
+            "title": "Poll Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authenticator_id",
+          "poll_secret"
+        ],
+        "title": "AppAuth"
       },
       "AppCreate": {
         "properties": {
@@ -6252,17 +6681,20 @@
             "title": "Max Minutes",
             "default": 30
           },
-          "confirm_password": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Confirm Password"
+          "step_up": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepUp"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
-          "reason",
-          "confirm_password"
+          "reason"
         ],
         "title": "AssistRequest"
       },
@@ -6739,28 +7171,6 @@
         ],
         "title": "CertificateOut"
       },
-      "ChangePasswordRequest": {
-        "properties": {
-          "current_password": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Current Password"
-          },
-          "new_password": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "New Password"
-          }
-        },
-        "type": "object",
-        "required": [
-          "current_password",
-          "new_password"
-        ],
-        "title": "ChangePasswordRequest"
-      },
       "ComplianceSettingUpdate": {
         "properties": {
           "enabled": {
@@ -6785,6 +7195,56 @@
           "severity"
         ],
         "title": "ComplianceSettingUpdate"
+      },
+      "DecideBody": {
+        "properties": {
+          "authenticator_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Authenticator Id"
+          },
+          "poll_secret": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 20,
+            "title": "Poll Secret"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "deny"
+            ],
+            "title": "Decision"
+          },
+          "number": {
+            "type": "integer",
+            "maximum": 99.0,
+            "minimum": 0.0,
+            "title": "Number"
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authenticator_id",
+          "poll_secret",
+          "request_id",
+          "decision",
+          "number",
+          "signature"
+        ],
+        "title": "DecideBody"
       },
       "DeploymentOut": {
         "properties": {
@@ -7535,6 +7995,21 @@
         "title": "EmployeeUpdate",
         "description": "Mover workflow: any change to department / title / manager is recorded as a 'mover' event."
       },
+      "EnrollOptionsRequest": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 10,
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "EnrollOptionsRequest"
+      },
       "EnrollResponse": {
         "properties": {
           "device_id": {
@@ -7578,6 +8053,40 @@
           "command_public_key"
         ],
         "title": "EnrollResponse"
+      },
+      "EnrollVerifyRequest": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 10,
+            "title": "Token"
+          },
+          "challenge_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Challenge Id"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Credential"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "default": "Passkey"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "challenge_id",
+          "credential"
+        ],
+        "title": "EnrollVerifyRequest"
       },
       "EnrollmentTokenCreate": {
         "properties": {
@@ -7793,20 +8302,6 @@
           "revoked_at"
         ],
         "title": "EnrollmentTokenOut"
-      },
-      "ForgotPasswordRequest": {
-        "properties": {
-          "email": {
-            "type": "string",
-            "format": "email",
-            "title": "Email"
-          }
-        },
-        "type": "object",
-        "required": [
-          "email"
-        ],
-        "title": "ForgotPasswordRequest"
       },
       "HTTPValidationError": {
         "properties": {
@@ -8044,38 +8539,15 @@
         ],
         "title": "LifecycleRequest"
       },
-      "LoginRequest": {
-        "properties": {
-          "email": {
-            "type": "string",
-            "format": "email",
-            "title": "Email"
-          },
-          "password": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Password"
-          }
-        },
-        "type": "object",
-        "required": [
-          "email",
-          "password"
-        ],
-        "title": "LoginRequest"
-      },
       "LoginResponse": {
         "properties": {
           "mfa_required": {
             "type": "boolean",
-            "title": "Mfa Required"
+            "title": "Mfa Required",
+            "default": false
           }
         },
         "type": "object",
-        "required": [
-          "mfa_required"
-        ],
         "title": "LoginResponse"
       },
       "MeResponse": {
@@ -8116,10 +8588,6 @@
             "type": "array",
             "title": "Permissions"
           },
-          "mfa_enabled": {
-            "type": "boolean",
-            "title": "Mfa Enabled"
-          },
           "email_verified": {
             "type": "boolean",
             "title": "Email Verified"
@@ -8146,7 +8614,6 @@
           "organization_name",
           "roles",
           "permissions",
-          "mfa_enabled",
           "email_verified",
           "last_login_at"
         ],
@@ -8164,61 +8631,6 @@
           "detail"
         ],
         "title": "Message"
-      },
-      "MfaCode": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "maxLength": 8,
-            "minLength": 6,
-            "title": "Code"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code"
-        ],
-        "title": "MfaCode"
-      },
-      "MfaDisableRequest": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "maxLength": 8,
-            "minLength": 6,
-            "title": "Code"
-          },
-          "password": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Password"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code",
-          "password"
-        ],
-        "title": "MfaDisableRequest"
-      },
-      "MfaSetupResponse": {
-        "properties": {
-          "secret": {
-            "type": "string",
-            "title": "Secret"
-          },
-          "otpauth_uri": {
-            "type": "string",
-            "title": "Otpauth Uri"
-          }
-        },
-        "type": "object",
-        "required": [
-          "secret",
-          "otpauth_uri"
-        ],
-        "title": "MfaSetupResponse"
       },
       "NotificationOut": {
         "properties": {
@@ -8377,6 +8789,60 @@
           "page_size"
         ],
         "title": "Page[EmployeeOut]"
+      },
+      "PairBody": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 10,
+            "title": "Token"
+          },
+          "public_key_pem": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 100,
+            "title": "Public Key Pem"
+          },
+          "key_alg": {
+            "type": "string",
+            "enum": [
+              "ES256",
+              "RS256"
+            ],
+            "title": "Key Alg"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ],
+            "title": "Platform"
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 10,
+            "title": "Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "public_key_pem",
+          "key_alg",
+          "name",
+          "platform",
+          "signature"
+        ],
+        "title": "PairBody"
       },
       "PasskeyLogin": {
         "properties": {
@@ -8657,22 +9123,33 @@
             "type": "string",
             "format": "email",
             "title": "Email"
-          },
-          "password": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Password"
           }
         },
         "type": "object",
         "required": [
           "organization_name",
           "full_name",
-          "email",
-          "password"
+          "email"
         ],
         "title": "RegisterRequest"
+      },
+      "RegisterResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "enroll_token": {
+            "type": "string",
+            "title": "Enroll Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail",
+          "enroll_token"
+        ],
+        "title": "RegisterResponse"
       },
       "RenewResponse": {
         "properties": {
@@ -8692,28 +9169,6 @@
           "not_after"
         ],
         "title": "RenewResponse"
-      },
-      "ResetPasswordRequest": {
-        "properties": {
-          "token": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 20,
-            "title": "Token"
-          },
-          "new_password": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "New Password"
-          }
-        },
-        "type": "object",
-        "required": [
-          "token",
-          "new_password"
-        ],
-        "title": "ResetPasswordRequest"
       },
       "RoleDetail": {
         "properties": {
@@ -8803,6 +9258,41 @@
         ],
         "title": "SearchHit"
       },
+      "SetPlan": {
+        "properties": {
+          "plan_key": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Plan Key"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^(active|past_due|cancelled)$",
+            "title": "Status",
+            "default": "active"
+          },
+          "max_device_slots": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "minimum": -1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Device Slots",
+            "default": -1
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_key"
+        ],
+        "title": "SetPlan"
+      },
       "SetRolesRequest": {
         "properties": {
           "roles": {
@@ -8827,6 +9317,27 @@
         ],
         "title": "SetRolesRequest"
       },
+      "StepUp": {
+        "properties": {
+          "challenge_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Challenge Id"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Credential"
+          }
+        },
+        "type": "object",
+        "required": [
+          "challenge_id",
+          "credential"
+        ],
+        "title": "StepUp",
+        "description": "A fresh passkey assertion confirming a sensitive action (from /auth/step-up/options)."
+      },
       "TerminateRequest": {
         "properties": {
           "reason": {
@@ -8841,21 +9352,6 @@
           "reason"
         ],
         "title": "TerminateRequest"
-      },
-      "TokenRequest": {
-        "properties": {
-          "token": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 20,
-            "title": "Token"
-          }
-        },
-        "type": "object",
-        "required": [
-          "token"
-        ],
-        "title": "TokenRequest"
       },
       "UnassignRequest": {
         "properties": {

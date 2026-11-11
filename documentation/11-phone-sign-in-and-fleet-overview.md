@@ -1,6 +1,12 @@
 # Phone approval sign-in (Phase 8) and fleet overview (Phase 9)
 
-## Phone approval sign-in
+> **Removed in the passkey-only refactor (Phase 13).** Phone-approval *console* sign-in (`/auth/phone/start`,
+> `/auth/phone/status`, "Sign in with your phone") no longer exists — the only console sign-in is a WebAuthn passkey
+> (see `08-identity-and-sso.md`). A phone can still be a console passkey through standard WebAuthn (platform or
+> cross-device/hybrid). **Phone-authenticator pairing is kept**, and the paired biometric key now drives **Windows
+> laptop unlock only** (`12-windows-phone-unlock.md`). The section below is retained for historical context.
+
+## Phone approval sign-in (historical)
 
 ```
 Browser (console login)            API                                   Cage Authenticator (phone)

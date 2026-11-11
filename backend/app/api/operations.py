@@ -73,7 +73,11 @@ def dashboard_summary(ctx: AuthContext = Depends(require_permission("dashboard:r
         AuthenticationEvent.success.is_(False), AuthenticationEvent.created_at >= now - timedelta(hours=24), *auth_f)) or 0
     locked = db.scalar(select(func.count()).select_from(User).where(User.organization_id == org,
                                                                    User.locked_until > now, *usr_f)) or 0
-    admins = db.execute(select(User.status, User.mfa_enabled).where(User.organization_id == org, *usr_f)).all()
+    from app.models import WebAuthnCredential
+    admin_rows = db.execute(select(User.id, User.status).where(User.organization_id == org, *usr_f)).all()
+    active_ids = [uid for uid, s in admin_rows if s == "active"]
+    with_passkey = set(db.scalars(select(WebAuthnCredential.user_id).where(
+        WebAuthnCredential.user_id.in_(active_ids), WebAuthnCredential.revoked_at.is_(None)))) if active_ids else set()
 
     recent = []
     if "audit:read" in ctx.permissions:
@@ -100,9 +104,9 @@ def dashboard_summary(ctx: AuthContext = Depends(require_permission("dashboard:r
             "logins_by_day": [{"date": k, **v} for k, v in days.items()],
         },
         "administrators": {
-            "total": len(admins),
-            "active": sum(1 for s, _ in admins if s == "active"),
-            "mfa_enabled": sum(1 for s, m in admins if s == "active" and m),
+            "total": len(admin_rows),
+            "active": len(active_ids),
+            "with_passkey": sum(1 for uid in active_ids if uid in with_passkey),
             # "Online" = a live session used in the last 15 minutes (real activity, not a guess).
             "online": db.scalar(select(func.count(func.distinct(UserSession.user_id))).join(User, User.id == UserSession.user_id)
                                 .where(User.organization_id == org, UserSession.revoked_at.is_(None),

@@ -2,8 +2,8 @@
 passkey via a single-use token, with no password ever set. Uses the real py_webauthn library via SoftAuthenticator."""
 from __future__ import annotations
 
-from tests.conftest import STRONG, csrf, last_token, login
-from tests.test_identity import SoftAuthenticator, _passkey_login
+from tests.conftest import SoftAuthenticator, csrf, invite_and_accept, last_token, login
+from tests.test_identity import _passkey_login
 
 
 def _enroll(client, token: str, authn: SoftAuthenticator, name="Phone"):
@@ -72,17 +72,8 @@ def test_admin_issued_recovery_revokes_old_passkey_and_enrols_new(client, outbox
 
 def test_recovery_requires_user_management_permission(client, outbox):
     _bootstrap_passwordless(client)
-    assert client.post("/api/v1/users", json={"email": "analyst@example.com", "full_name": "An Analyst",
-                                              "role": "security_analyst"}, headers=csrf(client)).status_code == 201
-    uid = client.get("/api/v1/auth/me").json()["id"]
-    client.post("/api/v1/auth/invite/accept",
-                json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+    uid = client.get("/api/v1/auth/me").json()["id"]  # root's own id, the recovery target
+    invite_and_accept(client, outbox, "analyst@example.com", "security_analyst", "An Analyst")  # enrols a passkey
     client.post("/api/v1/auth/logout", headers=csrf(client))
     login(client, "analyst@example.com")  # analyst lacks users:manage
     assert client.post(f"/api/v1/users/{uid}/recovery", headers=csrf(client)).status_code == 403
-
-
-def test_legacy_password_bootstrap_still_works_during_stage_a(client):
-    r = client.post("/api/v1/auth/register", json={
-        "organization_name": "Acme", "full_name": "Ada Root", "email": "root@example.com", "password": STRONG})
-    assert r.status_code == 201 and r.json()["enroll_token"] is None

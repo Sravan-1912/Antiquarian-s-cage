@@ -18,8 +18,9 @@ Windows paths are shown for the development machine; the Docker stack uses the s
 5. **Harden** — `docker compose exec postgres psql -U cage_owner -d antiquarians_cage -f - < infrastructure/scripts/harden_db.sql`
 6. **Preflight** — `docker compose exec api python -m app.preflight` must report `0 failed`. Paste the output into the
    change record.
-7. **Bootstrap** — open the console; the first visit creates the organisation and Super Admin. Enable MFA (or a passkey)
-   immediately.
+7. **Bootstrap** — open the console; the first visit creates the organisation and Super Admin and runs the passkey
+   registration ceremony (no password is ever set). **Register a second passkey immediately** (a different device or a
+   security key) so a single lost/broken authenticator cannot lock out the sole Super Admin.
 8. **Anchor storage** — mount WORM / remote storage at `/app/anchors` (`cageanchors` volume by default). Check the
    audit page shows "written to external anchor storage" after the first hour (or press *Anchor now*).
 
@@ -89,8 +90,17 @@ the next successful write. Until then truncation is only detectable from the dat
 **Lost command-signing key / device CA.** Restore `pki/` from the latest bundle. If unrecoverable: create new keys,
 every agent must re-pin (signing key) or re-enrol (CA). This is why the keys are in every backup.
 
+**Admin locked out of their passkey (normal recovery).** Another administrator with `users:manage` opens
+Administrators → the user → **Send recovery link** (or `POST /users/{id}/recovery`). The emailed `/recover` link runs a
+passkey registration ceremony that revokes the user's old passkeys and enrols a new one. Audited.
+
+**Sole Super Admin lost every passkey (break-glass).** With host/DB access, run
+`docker compose exec api python -m app.recover <email>`. It mints a single-use `passkey_recovery` token and prints the
+absolute `/recover` enrolment URL; open it to register a fresh passkey and sign back in. This command is the reason
+admin-issued-only recovery is safe — guard host access accordingly, and afterwards register a second passkey.
+
 **Suspected compromised admin account.** Administrators → disable account (revokes sessions) → review the audit log
-filtered by that actor → rotate their passkeys/MFA → check alerts for `admin_activity_burst`.
+filtered by that actor → revoke their passkeys → check alerts for `admin_activity_burst`.
 
 **Agent fleet stops reporting.** Check the API health (`/api/v1/health`), Nginx 8443 listener and its client CA, and
 certificate expiry on the device page. Agents back off and resume automatically.

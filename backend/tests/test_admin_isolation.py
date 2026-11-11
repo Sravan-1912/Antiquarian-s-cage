@@ -2,14 +2,12 @@
 sees everything; endpoint accounts have no console access."""
 from __future__ import annotations
 
-from tests.conftest import STRONG, bootstrap_admin, csrf, last_token, login
+from tests.conftest import bootstrap_admin, csrf, invite_and_accept, login
 from tests.test_endpoints import FakeAgent
 
 
 def _invite(client, outbox, email, role):
-    assert client.post("/api/v1/users", json={"email": email, "full_name": "A B", "role": role},
-                       headers=csrf(client)).status_code == 201
-    client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+    invite_and_accept(client, outbox, email, role, full_name="A B")
 
 
 def _employee(client, number, email):
