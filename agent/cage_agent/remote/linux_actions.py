@@ -16,6 +16,7 @@ import pwd
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 import psutil
 
@@ -37,12 +38,17 @@ def _run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
 
 # --------------------------------------------------------------------------------------------- local accounts
 def _local_users() -> list[dict]:
-    """Real local login accounts (UID 0 or >= 1000 with a login shell), with enabled state from the shadow lock state."""
-    import spwd  # may require root; handled below
+    """Real local login accounts (UID 0 or >= 1000 with a login shell), with enabled state from the shadow lock state.
+
+    Reads /etc/shadow directly (the spwd module was removed in Python 3.13); needs root, which the agent has as a
+    service. When /etc/shadow is unreadable, the enabled state is reported as unknown (None)."""
     shadow: dict[str, str] = {}
     try:
-        shadow = {e.sp_namp: e.sp_pwdp or "" for e in spwd.getspall()}
-    except (PermissionError, OSError):
+        for line in Path("/etc/shadow").read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.split(":")
+            if len(parts) >= 2:
+                shadow[parts[0]] = parts[1]
+    except OSError:
         shadow = {}
     out = []
     for p in pwd.getpwall():
