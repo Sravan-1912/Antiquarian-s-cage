@@ -21,9 +21,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import secrets
 import uuid
-from dataclasses import dataclass
 from datetime import timedelta
 
 from cryptography.exceptions import InvalidSignature
@@ -38,10 +36,10 @@ from app.models import Organization, PhoneAuthenticator, PhoneLoginRequest, Phon
 from app.security.tokens import constant_time_equals, hash_token, new_token
 from app.services import audit
 from app.services.audit import Actor
-from app.services.auth import AuthError, ClientInfo, LoginResult, _complete_login, _create_session, _event
+from app.services.auth import ClientInfo
 
 PAIRING_TTL = timedelta(minutes=5)
-REQUEST_TTL = timedelta(minutes=2)
+REQUEST_TTL = timedelta(minutes=2)  # used by the Windows-unlock flow (app/api/remote.py / unlock) to set request expiry
 MAX_AUTHENTICATORS = 3
 
 
@@ -161,36 +159,7 @@ def describe(a: PhoneAuthenticator) -> dict:
             "created_at": a.created_at, "last_used_at": a.last_used_at}
 
 
-# --------------------------------------------------------------------------------------------- sign-in
-@dataclass
-class Started:
-    request_id: uuid.UUID
-    number: int
-    browser_secret: str
-    expires_at: object
-
-
-def start_login(db: Session, email_addr: str, client: ClientInfo, *, purpose: str = "console",
-                context: dict | None = None) -> Started:
-    email_addr = email_addr.strip().lower()
-    user = db.scalar(select(User).where(func.lower(User.email) == email_addr))
-    eligible = user is not None and user.status == "active" and db.scalar(
-        select(func.count()).select_from(PhoneAuthenticator).where(
-            PhoneAuthenticator.user_id == user.id, PhoneAuthenticator.revoked_at.is_(None))) > 0
-    secret = new_token(32)
-    r = PhoneLoginRequest(id=uuid.uuid4(), organization_id=user.organization_id if user else None,
-                          user_id=user.id if eligible else None, purpose=purpose,
-                          browser_secret_hash=hash_token(secret), challenge=new_token(24),
-                          number=secrets.randbelow(90) + 10, client_ip=client.ip,
-                          user_agent=(client.user_agent or "")[:300], context=context or {},
-                          expires_at=utcnow() + REQUEST_TTL)
-    db.add(r)
-    if user is not None:
-        _event(db, user.organization_id, user, "phone_request", True, client,
-               None if eligible else "no_phone_paired", email_attempted=email_addr)
-    return Started(r.id, r.number, secret, r.expires_at)
-
-
+# ----------------------------------------------------------- phone approval (Windows unlock + the authenticator app)
 def _choices(r: PhoneLoginRequest) -> list[int]:
     """Three distinct numbers including the right one, in an order derived from the challenge (stable per request)."""
     seed = int.from_bytes(hashlib.sha256(r.challenge.encode()).digest()[:8], "big")
@@ -257,26 +226,3 @@ def decide(db: Session, authenticator_id: uuid.UUID, poll_secret: str, request_i
     audit.record(db, user.organization_id, actor, "phone.request_approved", target_type="phone_login_request",
                  target_id=r.id, metadata={"ip": r.client_ip, "purpose": r.purpose, "phone": a.name})
     return "approved"
-
-
-def collect(db: Session, request_id: uuid.UUID, browser_secret: str, client: ClientInfo) -> tuple[str, LoginResult | None]:
-    """Browser poll. Returns (status, LoginResult when approved). The session is issued exactly once."""
-    r = db.scalar(select(PhoneLoginRequest).where(PhoneLoginRequest.id == request_id).with_for_update())
-    if r is None or not browser_secret or not constant_time_equals(hash_token(browser_secret), r.browser_secret_hash):
-        raise PhoneAuthError("Unknown sign-in request.", 404)
-    if r.status == "pending" and r.expires_at <= utcnow():
-        r.status = "expired"
-    if r.status != "approved":
-        return r.status, None
-    if r.purpose != "console":
-        raise PhoneAuthError("This request is not for console sign-in.", 409)
-    user = db.get(User, r.user_id)
-    if user is None or user.status != "active":
-        r.status = "denied"
-        raise AuthError("This account is disabled.", 403)
-    if user.locked_until and user.locked_until > utcnow():
-        raise AuthError("Account temporarily locked after repeated failed sign-ins. Try again later.", 423)
-    r.status = "consumed"
-    token, csrf = _create_session(db, user, client, mfa_verified=True, amr=["hwk", "user", "mfa", "phone"])
-    _complete_login(db, user, client, "phone")
-    return "approved", LoginResult(user, token, csrf, mfa_required=False)
