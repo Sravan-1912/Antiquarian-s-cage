@@ -82,6 +82,19 @@ def _enabled_sudoers(users: list[dict], sudoers: set[str]) -> set[str]:
 
 
 # --------------------------------------------------------------------------------------------------- inspect
+def _top_processes(n: int = 8) -> list[dict]:
+    """Top processes by memory — a quick live resource view."""
+    procs = []
+    for pr in psutil.process_iter(["pid", "name", "memory_percent"]):
+        try:
+            procs.append(pr.info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    top = sorted(procs, key=lambda x: x.get("memory_percent") or 0, reverse=True)[:n]
+    return [{"pid": p["pid"], "name": (p.get("name") or "?")[:48], "mem_percent": round(p.get("memory_percent") or 0, 1)}
+            for p in top]
+
+
 def inspect(_: dict) -> Outcome:
     vm = psutil.virtual_memory()
     data = {
@@ -92,6 +105,7 @@ def inspect(_: dict) -> Outcome:
         "process_count": len(psutil.pids()),
         "disks": [{"mount": p.mountpoint, "free_percent": round(100 - psutil.disk_usage(p.mountpoint).percent, 1)}
                   for p in psutil.disk_partitions(all=False) if p.fstype and "cdrom" not in p.opts][:10],
+        "top_processes": _top_processes(),
     }
     try:
         users = _local_users()

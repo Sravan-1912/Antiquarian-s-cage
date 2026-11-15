@@ -105,12 +105,27 @@ export function RemotePanel({ device }: { device: Device }) {
           <div className="border-t border-ink-700 px-4 py-3">
             <div className="mb-2 text-xs font-medium text-silver-500">Live status {latestInspect && <span className="font-normal">· {relativeTime(latestInspect.completed_at ?? latestInspect.issued_at)}</span>}</div>
             {!latestInspect ? <p className="text-xs text-silver-600">Run “Inspect status” to collect a live snapshot.</p> : (
-              <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-sm">
-                <dt className="text-silver-500">Uptime</dt><dd>{fmtUptime(st.uptime_seconds)}</dd>
-                <dt className="text-silver-500">CPU / memory</dt><dd>{st.cpu_percent ?? '—'}% / {st.memory_percent ?? '—'}%</dd>
-                <dt className="text-silver-500">Signed-in users</dt><dd>{st.logged_on_users?.join(', ') || 'none'}</dd>
-                <dt className="text-silver-500">Processes</dt><dd>{st.process_count ?? '—'}</dd>
-              </dl>
+              <>
+                <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-sm">
+                  <dt className="text-silver-500">Uptime</dt><dd>{fmtUptime(st.uptime_seconds)}</dd>
+                  <dt className="text-silver-500">CPU / memory</dt><dd>{st.cpu_percent ?? '—'}% / {st.memory_percent ?? '—'}%</dd>
+                  <dt className="text-silver-500">Signed-in users</dt><dd>{st.logged_on_users?.join(', ') || 'none'}</dd>
+                  <dt className="text-silver-500">Processes</dt><dd>{st.process_count ?? '—'}</dd>
+                </dl>
+                {!!st.top_processes?.length && (
+                  <div className="mt-3">
+                    <div className="mb-1 text-xs font-medium text-silver-500">Top processes · by memory</div>
+                    <ul className="space-y-0.5 text-xs">
+                      {st.top_processes.slice(0, 8).map((p) => (
+                        <li key={p.pid} className="flex items-center justify-between gap-2">
+                          <span className="truncate text-silver-200">{p.name}</span>
+                          <span className="shrink-0 text-silver-500">{p.mem_percent}% · pid {p.pid}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </Card>

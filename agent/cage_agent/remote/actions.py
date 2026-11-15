@@ -38,9 +38,22 @@ ADMINS = ("Get-LocalGroupMember -SID 'S-1-5-32-544' | ForEach-Object { [pscustom
           "source = [string]$_.PrincipalSource } }")
 
 
+def _top_processes(n: int = 8) -> list[dict]:
+    procs = []
+    for pr in psutil.process_iter(["pid", "name", "memory_percent"]):
+        try:
+            procs.append(pr.info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    top = sorted(procs, key=lambda x: x.get("memory_percent") or 0, reverse=True)[:n]
+    return [{"pid": p["pid"], "name": (p.get("name") or "?")[:48], "mem_percent": round(p.get("memory_percent") or 0, 1)}
+            for p in top]
+
+
 def inspect(_: dict) -> Outcome:
     vm = psutil.virtual_memory()
     data = {
+        "top_processes": _top_processes(),
         "uptime_seconds": int(time.time() - psutil.boot_time()),
         "cpu_percent": psutil.cpu_percent(interval=1.0),
         "memory_percent": vm.percent,

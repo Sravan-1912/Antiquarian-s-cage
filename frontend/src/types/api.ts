@@ -360,6 +360,7 @@ export interface InspectState {
   logged_on_users?: string[]
   process_count?: number
   disks?: { mount: string; free_percent: number }[]
+  top_processes?: { pid: number; name: string; mem_percent: number }[]
   local_accounts?: { name: string; enabled: boolean; last_logon: string | null; sid: string }[]
   administrators?: { name: string; source: string }[]
   local_accounts_error?: string
