@@ -92,7 +92,39 @@ def create_app() -> FastAPI:
 
     app.include_router(api)
     app.include_router(agent.router)
+    _serve_spa(app, s.spa_dir)
     return app
+
+
+def _serve_spa(app: FastAPI, spa_dir: str | None) -> None:
+    """Serve the built console SPA on the same origin as the API (desktop app / single-container deploy). Registered
+    after /api and /agent so those always win; unknown GET paths fall back to index.html for client-side routing."""
+    if not spa_dir:
+        return
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+
+    root = Path(spa_dir)
+    index = root / "index.html"
+    if not index.is_file():
+        log.warning("SPA_DIR=%s has no index.html; not serving the console", spa_dir)
+        return
+    if (root / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str):
+        # An unmatched /api or /agent path is a real not-found, not an SPA route: keep it a JSON 404.
+        if full_path == "api" or full_path == "agent" or full_path.startswith(("api/", "agent/")):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        candidate = root / full_path
+        if full_path and candidate.is_file() and root in candidate.resolve().parents:
+            return FileResponse(candidate)
+        return FileResponse(index)  # SPA routes resolve client-side
+
+    log.info("serving console SPA from %s", spa_dir)
 
 
 app = create_app()

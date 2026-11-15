@@ -13,7 +13,10 @@ export default defineConfig({
   server: {
     port: Number(process.env.VITE_PORT ?? 5173),
     strictPort: true,
-    proxy: { '/api': { target: API_TARGET, changeOrigin: false } },
+    allowedHosts: true,  // dev: accept the Cloudflare quick-tunnel hostname (*.trycloudflare.com)
+    // Proxy both the console API (/api) and the agent channel (/agent) to the backend, so one tunnel origin serves
+    // the browser console and remote endpoint agents (dev only; production nginx does the same).
+    proxy: { '/api': { target: API_TARGET, changeOrigin: false }, '/agent': { target: API_TARGET, changeOrigin: false } },
   },
   build: { sourcemap: false, outDir: 'dist' },
   test: { environment: 'jsdom', include: ['src/**/*.test.{ts,tsx}'] },

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -10,11 +11,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # The desktop app sets CAGE_ENV_FILE="" so a stray .env next to the exe can never override its config.
+    model_config = SettingsConfigDict(env_file=os.environ.get("CAGE_ENV_FILE", ".env") or None,
+                                      env_file_encoding="utf-8", extra="ignore")
 
-    environment: Literal["development", "test", "production"] = "development"
+    environment: Literal["development", "test", "production", "desktop"] = "development"
     app_name: str = "Antiquarian's Cage"
     public_base_url: str = "http://localhost:5173"
+    # When set to the built frontend's directory, the API also serves the console SPA on the same origin (desktop app /
+    # single-container deploys). Unset in normal dev, where Vite serves it.
+    spa_dir: str | None = None
     # Address phones use to reach the API (pairing QR). Defaults to PUBLIC_BASE_URL; in development set it to this
     # machine's LAN address (e.g. http://192.168.1.20:8000) because a phone cannot reach "localhost".
     phone_api_base_url: str | None = None
