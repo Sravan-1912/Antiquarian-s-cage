@@ -20,6 +20,9 @@ def _clip(v, n: int = 128):
 
 
 def collect_os(errors: list[str]) -> dict:
+    if sys.platform.startswith("linux"):
+        from cage_agent.collectors import linux_facts
+        return linux_facts.os_info()
     info = {"name": None, "version": platform.version()[:64], "build": None, "edition": None,
             "architecture": platform.machine()[:64], "install_date": None, "last_boot": None}
     try:
@@ -49,6 +52,16 @@ def collect_hardware(errors: list[str]) -> tuple[dict, dict, int | None]:
            "physical_cores": psutil.cpu_count(logical=False), "logical_processors": psutil.cpu_count(),
            "max_clock_mhz": None}
     memory = psutil.virtual_memory().total
+    if sys.platform.startswith("linux"):
+        from cage_agent.collectors import linux_facts
+        fw = linux_facts.hardware_firmware()
+        hw.update(manufacturer=_clip(fw.get("manufacturer")), model=_clip(fw.get("model")),
+                  serial_number=_clip(fw.get("serial")))
+        cpuinfo = linux_facts._read("/proc/cpuinfo") or ""
+        m = next((ln.split(":", 1)[1].strip() for ln in cpuinfo.splitlines() if ln.lower().startswith("model name")), None)
+        if m:
+            cpu["name"] = _clip(m)
+        return hw, cpu, memory
     try:
         cs = powershell.run("computer_system") or {}
         hw.update(manufacturer=_clip(cs.get("Manufacturer")), model=_clip(cs.get("Model")))

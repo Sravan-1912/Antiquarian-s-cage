@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -23,8 +24,14 @@ class JobExecutor:
         self.save_cfg = save_cfg
         self.replay = ReplayStore(data_dir / "agent-replay.json")
         self.results_path = data_dir / "job-results.json"
+        self.rollback_path = data_dir / "policy-rollback.json"  # Linux: the root agent tracks policy rollback itself
         if broker_call is None:
-            from cage_broker.pipe import call as broker_call
+            import sys
+            if sys.platform.startswith("linux"):
+                def broker_call(_env: dict) -> dict:  # no named-pipe broker on Linux; every action runs locally
+                    return {"status": "failed", "detail": "no privileged broker on Linux (actions run in-process)"}
+            else:
+                from cage_broker.pipe import call as broker_call
         self.broker_call = broker_call
         self.session_event: Callable[[str, str, str | None], None] | None = None
         self.assist = None
@@ -86,7 +93,9 @@ class JobExecutor:
                     self._assist(report).start(env) if command == "assist.start" else self._assist(report).end(env)
                     handled += 1
                     continue  # the assist manager reports (and caches) asynchronously
-                if self._runs_locally(command):
+                if command.startswith("policy.") and sys.platform.startswith("linux"):
+                    result = self._run_policy_linux(command, env["parameters"])
+                elif self._runs_locally(command):
                     result = self._run_local(command, env["parameters"])
                 else:
                     try:
@@ -111,6 +120,9 @@ class JobExecutor:
 
     @staticmethod
     def _runs_locally(command: str) -> bool:
+        import sys
+        if sys.platform.startswith("linux"):
+            return True  # no separate broker on Linux: the root agent executes every allowlisted action itself
         from cage_agent.commands.schemas import ROUTE
         if command == "device.lock":  # LockWorkStation must run in the user's session; session 0 → broker
             from cage_agent.remote.assist import _interactive
@@ -124,6 +136,39 @@ class JobExecutor:
             out = HANDLERS[command](params)
         except Exception as exc:  # noqa: BLE001 — reported, never swallowed
             log.exception("local action %s failed", command)
+            return {"status": "failed", "detail": f"{exc.__class__.__name__}: {str(exc)[:300]}"}
+        return {"status": out.status, "detail": out.detail, "previous_state": out.previous_state,
+                "current_state": out.current_state}
+
+    def _write_rollback(self, store: dict) -> None:
+        tmp = self.rollback_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(store), encoding="utf-8")
+        tmp.replace(self.rollback_path)
+
+    def _run_policy_linux(self, command: str, p: dict) -> dict:
+        """Apply/revert a policy directly on Linux (no separate broker). Mirrors cage_broker/core.py's policy path,
+        tracking rollback state in the agent's data directory."""
+        from cage_agent.policies import ElevationRequired, module, validate_policy_config
+        try:
+            cfg = validate_policy_config(p["category"], p.get("configuration"))
+            mod = module(p["category"])
+            store = json.loads(self.rollback_path.read_text(encoding="utf-8")) if self.rollback_path.exists() else {}
+            if command == "policy.apply":
+                out = mod.apply(cfg)
+                if out.status == "succeeded" and out.previous_state:
+                    store[p["policy_id"]] = out.previous_state
+                    self._write_rollback(store)
+                if out.status == "succeeded":
+                    self.replay.set_version(p["policy_id"], p["version"])
+            else:  # policy.remove
+                out = mod.remove(store.get(p["policy_id"], {}))
+                if out.status == "succeeded":
+                    store.pop(p["policy_id"], None)
+                    self._write_rollback(store)
+        except (ElevationRequired, PermissionError) as exc:
+            return {"status": "needs_attention", "detail": f"Requires root; agent is not running as root ({exc})"}
+        except Exception as exc:  # noqa: BLE001 — report every failure, never swallow
+            log.exception("linux policy %s failed", command)
             return {"status": "failed", "detail": f"{exc.__class__.__name__}: {str(exc)[:300]}"}
         return {"status": out.status, "detail": out.detail, "previous_state": out.previous_state,
                 "current_state": out.current_state}

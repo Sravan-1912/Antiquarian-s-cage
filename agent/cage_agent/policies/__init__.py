@@ -94,6 +94,10 @@ def validate_policy_config(category: str, cfg) -> dict:
 
 
 def module(category: str):
+    import sys
+    if sys.platform.startswith("linux"):
+        from cage_agent.policies.linux_policies import linux_module
+        return linux_module(category)
     from cage_agent.policies import (antivirus, bitlocker, firewall, password, screen_lock, usb,
                                      windows_update)
     return {"firewall": firewall, "bitlocker": bitlocker, "usb": usb, "antivirus": antivirus,

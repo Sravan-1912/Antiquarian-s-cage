@@ -183,3 +183,8 @@ HANDLERS = {
     "account.disable": account_disable, "account.enable": account_enable, "account.remove_admin": account_remove_admin,
     "assist.end": close_quick_assist,
 }
+
+# On Linux the POSIX implementations replace the whole handler set (see remote/linux_actions.py).
+if sys.platform.startswith("linux"):
+    from cage_agent.remote import linux_actions
+    HANDLERS = linux_actions.HANDLERS
