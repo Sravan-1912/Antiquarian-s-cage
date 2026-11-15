@@ -18,6 +18,7 @@ class SecurityAlert(UUIDPk, Timestamps, Base):
                       Index("ix_alerts_dedup_open", "organization_id", "dedup_key", "status"))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"))
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)  # admin isolation
     rule_key: Mapped[str] = mapped_column(String(48))
     # configuration | operational | suspicious_activity — never "attack": an alert is a lead, not a verdict.
     kind: Mapped[str] = mapped_column(String(24))

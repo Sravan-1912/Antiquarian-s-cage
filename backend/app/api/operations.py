@@ -15,10 +15,11 @@ from sqlalchemy.orm import Session
 from app.api.deps import AuthContext, current_context, require_permission
 from app.core.database import get_db, utcnow
 from app.core.config import get_settings
-from app.models import AuditLog, AuthenticationEvent, Device, Employee, Notification, User
+from app.models import AuditLog, AuthenticationEvent, Device, Employee, Notification, User, UserSession
 from app.schemas.admin import AnchorReportOut, AuditAnchorOut, AuditOut, AuditVerifyOut, NotificationOut, SearchHit
 from app.schemas.common import Message, Page
-from app.services import audit, audit_anchor
+from app.services import audit, audit_anchor, tenancy
+from app.services import devices as devices_svc
 from fastapi.responses import PlainTextResponse
 from app.models import AuditAnchor
 
@@ -34,18 +35,25 @@ def dashboard_summary(ctx: AuthContext = Depends(require_permission("dashboard:r
     org = ctx.user.organization_id
     now = utcnow()
     since = now - timedelta(days=13)
+    scope = tenancy.scope_admin_id(ctx)  # admin isolation: None for Super Admin (global)
+    emp_f = (Employee.owner_admin_id == scope,) if scope is not None else ()
+    usr_f = (or_(User.owner_admin_id == scope, User.id == scope),) if scope is not None else ()
+    tenant_uids = None
+    if scope is not None:
+        tenant_uids = list(db.scalars(select(User.id).where(User.organization_id == org, *usr_f)))
+    auth_f = (AuthenticationEvent.user_id.in_(tenant_uids),) if tenant_uids is not None else ()
     start_day = datetime(since.year, since.month, since.day, tzinfo=timezone.utc)
 
-    by_status = dict(db.execute(select(Employee.status, func.count()).where(Employee.organization_id == org)
+    by_status = dict(db.execute(select(Employee.status, func.count()).where(Employee.organization_id == org, *emp_f)
                                 .group_by(Employee.status)).all())
     by_dept = db.execute(select(Employee.department, func.count()).where(Employee.organization_id == org,
-                                                                        Employee.status != "offboarded")
+                                                                        Employee.status != "offboarded", *emp_f)
                          .group_by(Employee.department).order_by(func.count().desc()).limit(8)).all()
 
     events = db.execute(select(AuthenticationEvent.created_at, AuthenticationEvent.success)
                         .where(AuthenticationEvent.organization_id == org,
                                AuthenticationEvent.event_type == "login",
-                               AuthenticationEvent.created_at >= start_day)).all()
+                               AuthenticationEvent.created_at >= start_day, *auth_f)).all()
     days = {(start_day + timedelta(days=i)).date().isoformat(): {"success": 0, "failure": 0} for i in range(14)}
     for ts, ok in events:
         key = ts.date().isoformat()
@@ -53,7 +61,7 @@ def dashboard_summary(ctx: AuthContext = Depends(require_permission("dashboard:r
             days[key]["success" if ok else "failure"] += 1
 
     joiners = db.execute(select(Employee.created_at).where(Employee.organization_id == org,
-                                                           Employee.created_at >= start_day)).scalars().all()
+                                                           Employee.created_at >= start_day, *emp_f)).scalars().all()
     join_days = {k: 0 for k in days}
     for ts in joiners:
         k = ts.date().isoformat()
@@ -62,10 +70,14 @@ def dashboard_summary(ctx: AuthContext = Depends(require_permission("dashboard:r
 
     failed_24h = db.scalar(select(func.count()).select_from(AuthenticationEvent).where(
         AuthenticationEvent.organization_id == org, AuthenticationEvent.event_type == "login",
-        AuthenticationEvent.success.is_(False), AuthenticationEvent.created_at >= now - timedelta(hours=24))) or 0
+        AuthenticationEvent.success.is_(False), AuthenticationEvent.created_at >= now - timedelta(hours=24), *auth_f)) or 0
     locked = db.scalar(select(func.count()).select_from(User).where(User.organization_id == org,
-                                                                   User.locked_until > now)) or 0
-    admins = db.execute(select(User.status, User.mfa_enabled).where(User.organization_id == org)).all()
+                                                                   User.locked_until > now, *usr_f)) or 0
+    from app.models import WebAuthnCredential
+    admin_rows = db.execute(select(User.id, User.status).where(User.organization_id == org, *usr_f)).all()
+    active_ids = [uid for uid, s in admin_rows if s == "active"]
+    with_passkey = set(db.scalars(select(WebAuthnCredential.user_id).where(
+        WebAuthnCredential.user_id.in_(active_ids), WebAuthnCredential.revoked_at.is_(None)))) if active_ids else set()
 
     recent = []
     if "audit:read" in ctx.permissions:
@@ -92,9 +104,14 @@ def dashboard_summary(ctx: AuthContext = Depends(require_permission("dashboard:r
             "logins_by_day": [{"date": k, **v} for k, v in days.items()],
         },
         "administrators": {
-            "total": len(admins),
-            "active": sum(1 for s, _ in admins if s == "active"),
-            "mfa_enabled": sum(1 for s, m in admins if s == "active" and m),
+            "total": len(admin_rows),
+            "active": len(active_ids),
+            "with_passkey": sum(1 for uid in active_ids if uid in with_passkey),
+            # "Online" = a live session used in the last 15 minutes (real activity, not a guess).
+            "online": db.scalar(select(func.count(func.distinct(UserSession.user_id))).join(User, User.id == UserSession.user_id)
+                                .where(User.organization_id == org, UserSession.revoked_at.is_(None),
+                                       UserSession.expires_at > now,
+                                       UserSession.last_seen_at >= now - timedelta(minutes=15), *usr_f)) or 0,
         },
         "endpoints": _endpoint_summary(db, ctx, start_day, now) if (
             "devices:read" in ctx.permissions) else {"available": False, "module": "Endpoint management",
@@ -112,9 +129,11 @@ def dashboard_summary(ctx: AuthContext = Depends(require_permission("dashboard:r
 
 def _endpoint_summary(db: Session, ctx: AuthContext, start_day: datetime, now: datetime) -> dict:
     org = ctx.user.organization_id
+    scope = tenancy.scope_admin_id(ctx)
+    own = (Device.owner_admin_id == scope,) if scope is not None else ()
     cutoff = now - timedelta(seconds=get_settings().offline_threshold_seconds)
-    managed = (Device.organization_id == org, Device.status.in_(("active", "suspended")))
-    by_status = dict(db.execute(select(Device.status, func.count()).where(Device.organization_id == org)
+    managed = (Device.organization_id == org, Device.status.in_(("active", "suspended")), *own)
+    by_status = dict(db.execute(select(Device.status, func.count()).where(Device.organization_id == org, *own)
                                 .group_by(Device.status)).all())
     online = db.scalar(select(func.count()).select_from(Device).where(*managed, Device.last_heartbeat_at >= cutoff)) or 0
     never = db.scalar(select(func.count()).select_from(Device).where(*managed, Device.last_heartbeat_at.is_(None))) or 0
@@ -122,7 +141,7 @@ def _endpoint_summary(db: Session, ctx: AuthContext, start_day: datetime, now: d
     os_rows = db.execute(select(Device.os_name, func.count()).where(*managed).group_by(Device.os_name)
                          .order_by(func.count().desc())).all()
     enrolled = db.scalars(select(Device.enrolled_at).where(Device.organization_id == org,
-                                                           Device.enrolled_at >= start_day)).all()
+                                                           Device.enrolled_at >= start_day, *own)).all()
     per_day = {(start_day + timedelta(days=i)).date().isoformat(): 0 for i in range(14)}
     for ts in enrolled:
         k = ts.date().isoformat()
@@ -130,6 +149,28 @@ def _endpoint_summary(db: Session, ctx: AuthContext, start_day: datetime, now: d
             per_day[k] += 1
     compliance = dict(db.execute(select(Device.compliance_state, func.count()).where(*managed)
                                  .group_by(Device.compliance_state)).all())
+    seen = db.scalars(select(Device.last_heartbeat_at).where(*managed)).all()
+    buckets = {"online": 0, "under_1h": 0, "1h_24h": 0, "1d_7d": 0, "over_7d": 0, "never": 0}
+    for ts in seen:
+        if ts is None:
+            buckets["never"] += 1
+        elif ts >= cutoff:
+            buckets["online"] += 1
+        elif ts >= now - timedelta(hours=1):
+            buckets["under_1h"] += 1
+        elif ts >= now - timedelta(hours=24):
+            buckets["1h_24h"] += 1
+        elif ts >= now - timedelta(days=7):
+            buckets["1d_7d"] += 1
+        else:
+            buckets["over_7d"] += 1
+    platforms: dict[str, int] = {}
+    for o, c in os_rows:
+        fam = "Windows" if o and "windows" in o.lower() else ("macOS" if o and "mac" in o.lower() else
+                                                              ("Linux" if o and "linux" in o.lower() else "Unknown"))
+        platforms[fam] = platforms.get(fam, 0) + c
+    net = devices_svc.network_usage(db, org, 24, owner_admin_id=scope)
+    net.pop("per_device", None)
     return {
         "available": True,
         "enrolled": total,
@@ -143,6 +184,9 @@ def _endpoint_summary(db: Session, ctx: AuthContext, start_day: datetime, now: d
         "enrollments_by_day": [{"date": k, "count": v} for k, v in per_day.items()],
         "compliance_states": compliance,
         "offline_threshold_seconds": get_settings().offline_threshold_seconds,
+        "last_contact": buckets,
+        "platforms": [{"platform": k, "count": v} for k, v in sorted(platforms.items(), key=lambda x: -x[1])],
+        "network": net,
     }
 
 
@@ -154,10 +198,12 @@ def _alerts_summary(db: Session, ctx: AuthContext) -> dict:
 def _compliance_summary(db: Session, ctx: AuthContext) -> dict:
     from app.services import compliance
     org = ctx.user.organization_id
-    managed = (Device.organization_id == org, Device.status.in_(("active", "suspended")))
+    scope = tenancy.scope_admin_id(ctx)
+    own = (Device.owner_admin_id == scope,) if scope is not None else ()
+    managed = (Device.organization_id == org, Device.status.in_(("active", "suspended")), *own)
     states = dict(db.execute(select(Device.compliance_state, func.count()).where(*managed)
                              .group_by(Device.compliance_state)).all())
-    hist = compliance.org_history(db, org, 14)
+    hist = compliance.org_history(db, org, 14, owner_admin_id=scope)
     return {"available": True, "compliant": states.get("compliant", 0), "non_compliant": states.get("non_compliant", 0),
             "unknown": states.get("unknown", 0),
             "trend": [{"date": h["date"], "average_score": h["average_score"], "non_compliant": h["non_compliant"]}
@@ -167,14 +213,18 @@ def _compliance_summary(db: Session, ctx: AuthContext) -> dict:
 def _policy_summary(db: Session, ctx: AuthContext) -> dict:
     from app.models import EndpointPolicy, PolicyDeployment
     org = ctx.user.organization_id
+    scope = tenancy.scope_admin_id(ctx)
+    own = (EndpointPolicy.owner_admin_id == scope,) if scope is not None else ()
     rows = dict(db.execute(select(PolicyDeployment.status, func.count())
                            .join(EndpointPolicy, EndpointPolicy.id == PolicyDeployment.policy_id)
                            .where(EndpointPolicy.organization_id == org,
-                                  PolicyDeployment.created_at >= utcnow() - timedelta(days=30))
+                                  PolicyDeployment.created_at >= utcnow() - timedelta(days=30), *own)
                            .group_by(PolicyDeployment.status)).all())
     finished = rows.get("applied", 0) + rows.get("failed", 0) + rows.get("needs_attention", 0)
-    return {"available": True, "active_policies": db.scalar(select(func.count()).select_from(EndpointPolicy).where(
-                EndpointPolicy.organization_id == org, EndpointPolicy.status == "active")) or 0,
+    by_pstatus = dict(db.execute(select(EndpointPolicy.status, func.count()).where(EndpointPolicy.organization_id == org, *own)
+                                 .group_by(EndpointPolicy.status)).all())
+    return {"available": True, "active_policies": by_pstatus.get("active", 0),
+            "total_policies": sum(by_pstatus.values()), "inactive_policies": sum(by_pstatus.values()) - by_pstatus.get("active", 0),
             "pending": rows.get("pending", 0) + rows.get("in_progress", 0) + rows.get("offline", 0),
             "by_status": rows,
             "success_rate": round(100 * rows.get("applied", 0) / finished) if finished else None}

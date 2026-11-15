@@ -15,6 +15,7 @@ class EndpointPolicy(UUIDPk, Timestamps, Base):
     __tablename__ = "endpoint_policies"
     __table_args__ = (UniqueConstraint("organization_id", "name"), Index("ix_policies_org_category", "organization_id", "category"))
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"))
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)  # admin isolation
     name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str] = mapped_column(Text, default="")
     # firewall | bitlocker | usb | antivirus | screen_lock | windows_update | password

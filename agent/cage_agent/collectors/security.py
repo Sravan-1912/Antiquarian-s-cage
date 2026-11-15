@@ -246,4 +246,7 @@ CHECKS = {
 
 
 def collect_security(errors: list[str]) -> dict:
+    if sys.platform.startswith("linux"):
+        from cage_agent.collectors import linux_facts
+        return linux_facts.collect_security(errors)
     return {name: fn(errors) for name, fn in CHECKS.items()}

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api import agent, auth, devices, employees, identity, oidc, operations, remote, secops, security_mgmt, users
+from app.api import agent, auth, billing, devices, employees, identity, oidc, operations, phone, remote, secops, security_mgmt, users
 from app.core.config import get_settings
 from app.core.database import session_factory
 from app.core.logging import configure_logging
@@ -27,6 +27,9 @@ async def lifespan(_: FastAPI):
     configure_logging()
     with session_factory()() as db:
         sync_rbac(db)
+        from app.services.subscriptions import sync_plans
+        sync_plans(db)
+        db.commit()
     get_ca()  # fail fast if the device CA is missing or the passphrase is wrong
     get_signing_key()  # and the command-signing key
     get_oidc_key()  # and the OIDC token-signing key
@@ -78,6 +81,8 @@ def create_app() -> FastAPI:
     api.include_router(security_mgmt.router)
     api.include_router(identity.router)
     api.include_router(oidc.router)
+    api.include_router(phone.router)
+    api.include_router(billing.router)
 
     @api.get("/health", tags=["health"])
     def health():

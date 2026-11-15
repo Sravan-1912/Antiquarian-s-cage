@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from app.security import command_signing
-from tests.conftest import STRONG, bootstrap_admin, csrf, last_token, login
+from tests.conftest import SoftAuthenticator, bootstrap_admin, csrf, invite_and_accept, login, step_up
 from tests.test_endpoints import FakeAgent, _token
 
 
@@ -17,10 +17,17 @@ def _setup(client, outbox) -> FakeAgent:
     return agent
 
 
-def _act(client, agent, command, params=None, password=None, reason="ticket 4711"):
-    return client.post(f"/api/v1/devices/{agent.device_id}/actions",
-                       json={"command": command, "parameters": params or {}, "reason": reason,
-                             **({"confirm_password": password} if password else {})}, headers=csrf(client))
+def _act(client, agent, command, params=None, step=None, reason="ticket 4711"):
+    body = {"command": command, "parameters": params or {}, "reason": reason}
+    if step is not None:
+        body["step_up"] = step
+    return client.post(f"/api/v1/devices/{agent.device_id}/actions", json=body, headers=csrf(client))
+
+
+def _bad_step(client):
+    """A step-up assertion from an authenticator that is not the user's -> confirmation must fail."""
+    o = client.post("/api/v1/auth/step-up/options", headers=csrf(client)).json()
+    return {"challenge_id": o["challenge_id"], "credential": SoftAuthenticator().get(o["options"])}
 
 
 def _next_job(agent):
@@ -42,13 +49,14 @@ def test_actions_signed_and_reauth_for_sensitive(client, outbox):
     hist = client.get(f"/api/v1/devices/{agent.device_id}/actions").json()
     assert hist[0]["status"] == "succeeded" and hist[0]["result"]["current_state"]["uptime_seconds"] == 100
 
-    # Restart and account changes require the operator's password
+    # Restart and account changes require a fresh passkey confirmation (step-up)
+    R = "root@example.com"
     assert _act(client, agent, "device.restart", {"delay_seconds": 300}).status_code == 403
-    assert _act(client, agent, "device.restart", {"delay_seconds": 300}, password="wrong").status_code == 403
-    assert _act(client, agent, "device.restart", {"delay_seconds": 300}, password=STRONG).status_code == 201
-    assert _act(client, agent, "device.restart", {"delay_seconds": 5}, password=STRONG).status_code == 422
-    assert _act(client, agent, "account.disable", {"username": "bad\\name"}, password=STRONG).status_code == 422
-    assert _act(client, agent, "account.disable", {"username": "Guest"}, password=STRONG).status_code == 201
+    assert _act(client, agent, "device.restart", {"delay_seconds": 300}, step=_bad_step(client)).status_code == 403
+    assert _act(client, agent, "device.restart", {"delay_seconds": 300}, step=step_up(client, R)).status_code == 201
+    assert _act(client, agent, "device.restart", {"delay_seconds": 5}, step=step_up(client, R)).status_code == 422
+    assert _act(client, agent, "account.disable", {"username": "bad\\name"}, step=step_up(client, R)).status_code == 422
+    assert _act(client, agent, "account.disable", {"username": "Guest"}, step=step_up(client, R)).status_code == 201
     # Unknown / arbitrary commands are impossible
     assert _act(client, agent, "shell.exec", {"cmd": "whoami"}).status_code == 422
     denied = client.get("/api/v1/audit", params={"action": "remote.reauth_failed"}).json()
@@ -57,8 +65,8 @@ def test_actions_signed_and_reauth_for_sensitive(client, outbox):
 
 def _assist(client, agent, minutes=15):
     return client.post(f"/api/v1/devices/{agent.device_id}/assist",
-                       json={"reason": "User reported VPN issue", "max_minutes": minutes, "confirm_password": STRONG},
-                       headers=csrf(client))
+                       json={"reason": "User reported VPN issue", "max_minutes": minutes,
+                             "step_up": step_up(client, "root@example.com")}, headers=csrf(client))
 
 
 def test_session_consent_granted_then_user_ends(client, outbox):
@@ -144,8 +152,7 @@ def test_consent_policy_and_rbac(client, outbox):
     assert _next_job(agent)["parameters"]["require_consent"] is False
 
     for email, role in (("sa@example.com", "security_analyst"), ("it@example.com", "it_support")):
-        client.post("/api/v1/users", json={"email": email, "full_name": "Some Body", "role": role}, headers=csrf(client))
-        client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+        invite_and_accept(client, outbox, email, role)
     it_id = next(u["id"] for u in client.get("/api/v1/users").json() if u["email"] == "it@example.com")
     client.patch(f"/api/v1/devices/{agent.device_id}", json={"support_owner_id": it_id}, headers=csrf(client))
     client.post("/api/v1/auth/logout", headers=csrf(client))

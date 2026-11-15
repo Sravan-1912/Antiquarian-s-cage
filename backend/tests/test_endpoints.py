@@ -194,11 +194,9 @@ def test_device_rbac(client, outbox):
     _admin(client, outbox)
     agent = FakeAgent(client)
     agent.enroll(_token(client)["token"])
-    r = client.post("/api/v1/users", json={"email": "it@example.com", "full_name": "It Person", "role": "it_support"},
-                    headers=csrf(client))
-    it_id = r.json()["id"]
-    from tests.conftest import STRONG, last_token
-    client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+    from tests.conftest import invite_and_accept
+    invite_and_accept(client, outbox, "it@example.com", "it_support", full_name="It Person")
+    it_id = next(u["id"] for u in client.get("/api/v1/users").json() if u["email"] == "it@example.com")
     client.post("/api/v1/auth/logout", headers=csrf(client))
 
     login(client, "it@example.com")

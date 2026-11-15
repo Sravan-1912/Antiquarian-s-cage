@@ -6,7 +6,7 @@ import { Alert, Badge, Button, Card, CardHeader, EmptyState, Field, Input, Selec
 import { Dialog } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
-import type { AdminUser, Device, DeviceCertificate, DeviceEvent, Employee, Heartbeat, Inventory, Page } from '@/types/api'
+import type { AdminUser, Device, DeviceCertificate, DeviceEvent, Employee, Heartbeat, Inventory, NetworkUsage, Page } from '@/types/api'
 import { formatDateTime, relativeTime } from '@/utils/format'
 import { ConnectivityBadge, DeviceStatusBadge, SECURITY_LABELS, SecurityStateBadge, formatBytes } from './shared'
 import { DeviceComplianceCard, DevicePoliciesCard } from '@/modules/compliance/DeviceComplianceCard'
@@ -41,6 +41,7 @@ export function EndpointDetailPage() {
   const inv = useQuery({ queryKey: ['device', id, 'inventory'], queryFn: () => api.get<Inventory | null>(`/devices/${id}/inventory`) })
   const events = useQuery({ queryKey: ['device', id, 'events'], queryFn: () => api.get<DeviceEvent[]>(`/devices/${id}/events`) })
   const certs = useQuery({ queryKey: ['device', id, 'certs'], queryFn: () => api.get<DeviceCertificate[]>(`/devices/${id}/certificates`) })
+  const net = useQuery({ queryKey: ['device', id, 'network'], queryFn: () => api.get<NetworkUsage>(`/devices/${id}/network`), refetchInterval: 60_000 })
   const beats = useQuery({ queryKey: ['device', id, 'heartbeats'], queryFn: () => api.get<Heartbeat[]>(`/devices/${id}/heartbeats`), refetchInterval: 30_000 })
   const employees = useQuery({ queryKey: ['employees', 'active-all'], queryFn: () => api.get<Page<Employee>>('/employees?status=active&page_size=100'), enabled: editing })
   const admins = useQuery({ queryKey: ['admins'], queryFn: () => api.get<AdminUser[]>('/users'), enabled: editing && can('users:read') })
@@ -157,7 +158,10 @@ export function EndpointDetailPage() {
 
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         <Card>
-          <CardHeader title="Network interfaces" />
+          <CardHeader title="Network interfaces"
+            description={net.data && net.data.devices_reporting > 0
+              ? `Last 24 h: ${formatBytes(net.data.bytes_received)} received · ${formatBytes(net.data.bytes_sent)} sent`
+              : 'Traffic totals appear after two heartbeats from agent 0.5.0+'} />
           {!i?.network_interfaces.items.length ? <p className="px-4 py-3 text-sm text-silver-500">None reported.</p> : (
             <Table>
               <thead><tr><Th>Interface</Th><Th>MAC</Th><Th>IPv4</Th><Th>State</Th></tr></thead>

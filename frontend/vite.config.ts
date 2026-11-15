@@ -11,7 +11,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(__dirname, 'src') } },
   server: {
-    port: 5173,
+    port: Number(process.env.VITE_PORT ?? 5173),
     strictPort: true,
     proxy: { '/api': { target: API_TARGET, changeOrigin: false } },
   },

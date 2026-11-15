@@ -29,6 +29,7 @@ PERMISSIONS: dict[str, str] = {
     "reports:export": "Export reports as CSV/PDF",
     "org:settings": "Configure organisation settings",
     "self:read": "View own devices, applications and authentication settings",
+    "tenant:global": "See every admin's users and endpoints across the organisation (Super Admin only)",
 }
 
 ALL = set(PERMISSIONS)

@@ -20,6 +20,7 @@ class Device(UUIDPk, Timestamps, Base):
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"))
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)  # admin isolation
     employee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), index=True)
     support_owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     display_name: Mapped[str] = mapped_column(String(128))
@@ -46,6 +47,7 @@ class Device(UUIDPk, Timestamps, Base):
 class EnrollmentToken(UUIDPk, Base):
     __tablename__ = "enrollment_tokens"
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)  # admin isolation
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     label: Mapped[str] = mapped_column(String(128))
     employee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"))
@@ -92,6 +94,8 @@ class DeviceHeartbeat(Base):
     source_ip: Mapped[str | None] = mapped_column(String(64))
     agent_version: Mapped[str | None] = mapped_column(String(32))
     uptime_seconds: Mapped[int | None] = mapped_column(BigInteger)
+    net_bytes_sent: Mapped[int | None] = mapped_column(BigInteger)
+    net_bytes_recv: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class DeviceInventory(UUIDPk, Base):

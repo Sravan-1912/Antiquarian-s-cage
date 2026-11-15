@@ -25,7 +25,6 @@ class AdminUserOut(ORMModel):
     email: str
     full_name: str
     status: str
-    mfa_enabled: bool
     email_verified_at: datetime | None
     last_login_at: datetime | None
     locked_until: datetime | None

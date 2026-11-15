@@ -10,10 +10,28 @@ export async function signInWithPasskey(): Promise<void> {
   await api.post('/auth/passkeys/login/verify', { challenge_id, credential })
 }
 
+/** A fresh passkey assertion confirming a sensitive action (remote commands, remote assistance). Returns the
+ * `step_up` payload the API expects; throws if the user cancels or has no passkey. */
+export async function stepUp(): Promise<{ challenge_id: string; credential: unknown }> {
+  const { challenge_id, options } = await api.post<{ challenge_id: string; options: Parameters<typeof startAuthentication>[0]['optionsJSON'] }>('/auth/step-up/options')
+  const credential = await startAuthentication({ optionsJSON: options })
+  return { challenge_id, credential }
+}
+
 export async function registerPasskey(name: string): Promise<void> {
   const { challenge_id, options } = await api.post<{ challenge_id: string; options: Parameters<typeof startRegistration>[0]['optionsJSON'] }>('/auth/passkeys/register/options')
   const credential = await startRegistration({ optionsJSON: options })
   await api.post('/auth/passkeys/register/verify', { challenge_id, credential, name })
+}
+
+/**
+ * Passwordless onboarding/recovery: register the first passkey using a single-use token (from bootstrap, an invite,
+ * or an admin-issued recovery link) with no prior session. On success the server signs the user in.
+ */
+export async function enrolPasskey(token: string, name: string): Promise<void> {
+  const { challenge_id, options } = await api.post<{ challenge_id: string; options: Parameters<typeof startRegistration>[0]['optionsJSON'] }>('/auth/enroll/options', { token })
+  const credential = await startRegistration({ optionsJSON: options })
+  await api.post('/auth/enroll/verify', { token, challenge_id, credential, name })
 }
 
 /** Post-login destination for SSO. Only our own OIDC authorize endpoint is allowed — never an arbitrary URL. */

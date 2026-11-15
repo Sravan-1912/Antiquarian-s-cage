@@ -1,0 +1,24 @@
+[Unit]
+Description=Antiquarian's Cage endpoint agent
+Documentation=https://github.com/Sravan-1912/Antiquarian-s-cage
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root so the agent can report privileged security state and enforce policies / remote actions (lock,
+# restart, account changes). The device private key is stored 0600 in StateDirectory and machine-id-wrapped.
+User=root
+ExecStart=/opt/cage-agent/cage-agent run --data-dir /var/lib/cage-agent
+Restart=on-failure
+RestartSec=10
+StateDirectory=cage-agent
+StateDirectoryMode=0700
+# Hardening (loosened only as far as the agent needs: it reads system config and runs allowlisted system tools).
+NoNewPrivileges=no
+ProtectHome=read-only
+ProtectSystem=full
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -6,9 +6,7 @@ import './index.css'
 import { AuthProvider, useAuth } from '@/hooks/useAuth'
 import { AppShell } from '@/layouts/AppShell'
 import { Spinner } from '@/components/ui/primitives'
-import {
-  AcceptInvitePage, ForgotPasswordPage, LoginPage, MfaChallengePage, ResetPasswordPage, SetupPage, SsoErrorPage, VerifyEmailPage,
-} from '@/pages/auth/AuthPages'
+import { AcceptInvitePage, LoginPage, RecoverPage, SetupPage, SsoErrorPage } from '@/pages/auth/AuthPages'
 import { DashboardPage } from '@/modules/dashboard/DashboardPage'
 import { EmployeesPage } from '@/modules/employees/EmployeesPage'
 import { EmployeeDetailPage } from '@/modules/employees/EmployeeDetailPage'
@@ -81,12 +79,9 @@ createRoot(document.getElementById('root')!).render(
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/mfa" element={<MfaChallengePage />} />
             <Route path="/setup" element={<SetupPage />} />
-            <Route path="/verify-email" element={<VerifyEmailPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/accept-invite" element={<AcceptInvitePage />} />
+            <Route path="/recover" element={<RecoverPage />} />
             <Route path="/sso-error" element={<SsoErrorPage />} />
             <Route element={<RequireAuth><AppShell /></RequireAuth>}>
               <Route index element={<Home />} />

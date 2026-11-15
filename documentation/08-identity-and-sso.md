@@ -1,5 +1,27 @@
 # Identity, passkeys and single sign-on
 
+## Console sign-in: passkeys only
+
+There are **no passwords and no TOTP**. The only interactive sign-in is a WebAuthn passkey with user verification, which
+already combines possession (the authenticator) with a biometric/PIN and therefore counts as MFA on its own.
+
+Because you cannot register a passkey without first proving who you are — and there is no password to do that — every
+"set your credential" moment is a **single-use, short-lived token that drives a passkey registration ceremony**:
+
+* **Bootstrap** — first-run `register` creates the org + Super Admin in `pending` and returns an enrolment token; the
+  ceremony registers the first passkey, activates the account and signs in.
+* **Invitation** — inviting an administrator (or an employee to the workspace) emails an `/accept-invite` link carrying
+  the same kind of token.
+* **Admin-issued recovery** — `POST /users/{id}/recovery` (permission `users:manage`) issues a `passkey_recovery` token
+  and emails a `/recover` link; completing it **revokes the user's old passkeys** and enrols a new one. There is no
+  self-service email recovery.
+* **Break-glass** — `python -m app.recover <email>` is a server-only command (needs host DB access, like `app.preflight`)
+  that mints a recovery link for a sole Super Admin who has lost every passkey. This is what makes admin-issued-only recovery safe.
+
+Tokens are stored hashed, single-use, and consumed on success. A failed passkey assertion is rate-limited (per-IP and
+per-account) and feeds the security-operations detection rules. The former phone-approval *console* sign-in was removed;
+a phone remains a first-class console passkey via standard WebAuthn (platform or cross-device/hybrid).
+
 ## Employee accounts (joiner / mover / leaver)
 
 * *Employees → Invite to workspace* creates a sign-in account with the **Employee** role (`self:read` only) and emails
@@ -34,7 +56,7 @@
 Controls: exact redirect-URI match (https, http only for localhost), errors for unknown clients/redirects are shown on
 the IdP and never redirected, codes are hashed/single-use/60 s and bound to client + redirect + PKCE, the user must
 hold an active assignment at authorize, token and userinfo time (revocation is immediate at userinfo), per-app
-**MFA required** forces a step-up (passkey or password + TOTP), secrets are shown once and stored hashed, every
+**MFA required** is satisfied by the passkey session (its `amr` already carries `mfa`), every
 authorization and token exchange is an authentication event linked to the application.
 
 **Integration status:** an application stays *configured — not yet verified* until a real authorization-code exchange

@@ -1,18 +1,13 @@
 from sqlalchemy import text
 
-from tests.conftest import STRONG, bootstrap_admin, csrf, last_token, login
+from tests.conftest import bootstrap_admin, csrf, invite_and_accept, login
 
 EMP = {"employee_number": "E-1001", "full_name": "Grace Hopper", "email": "grace@example.com",
        "department": "Engineering", "job_title": "Engineer"}
 
 
 def _invite(client, outbox, email_addr: str, role: str) -> None:
-    r = client.post("/api/v1/users", json={"email": email_addr, "full_name": "Test Person", "role": role},
-                    headers=csrf(client))
-    assert r.status_code == 201, r.text
-    token = last_token(outbox, "/accept-invite")
-    r = client.post("/api/v1/auth/invite/accept", json={"token": token, "password": STRONG})
-    assert r.status_code == 200, r.text
+    invite_and_accept(client, outbox, email_addr, role, full_name="Test Person")
 
 
 def test_rbac_matrix_enforced_by_backend(client, outbox):
@@ -34,9 +29,12 @@ def test_rbac_matrix_enforced_by_backend(client, outbox):
     assert client.get("/api/v1/dashboard/summary").status_code == 200
     client.post("/api/v1/auth/logout", headers=csrf(client))
 
-    # Admin: manages employees but cannot manage administrators or read audit logs.
+    # Admin: manages the employees it owns, but cannot manage administrators or read audit logs, and is isolated from
+    # the Super Admin's own org-level employee (admin isolation).
     login(client, "admin@example.com")
-    emp_id = client.get("/api/v1/employees").json()["items"][0]["id"]
+    assert all(i["email"] != EMP["email"] for i in client.get("/api/v1/employees").json()["items"])
+    emp_id = client.post("/api/v1/employees", json={**EMP, "employee_number": "E-A", "email": "a@example.com"},
+                         headers=csrf(client)).json()["id"]
     assert client.post(f"/api/v1/employees/{emp_id}/suspend", json={"reason": "investigation"},
                        headers=csrf(client)).status_code == 200
     assert client.post("/api/v1/users", json={"email": "z@example.com", "full_name": "Zed Zed", "role": "super_admin"},

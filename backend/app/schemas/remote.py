@@ -38,21 +38,28 @@ class AccountParams(_P):
 
 ACTION_SCHEMAS: dict[str, type[_P]] = {
     "device.inspect": NoParams, "device.lock": NoParams, "device.restart": RestartParams,
-    "device.restart_cancel": NoParams, "account.disable": AccountParams, "account.enable": AccountParams,
-    "account.remove_admin": AccountParams,
+    "device.restart_cancel": NoParams, "device.shutdown": RestartParams, "device.logoff": NoParams,
+    "account.disable": AccountParams, "account.enable": AccountParams, "account.remove_admin": AccountParams,
 }
 # Actions that change the device's availability or accounts need the operator to re-enter their password.
-SENSITIVE = {"device.restart", "account.disable", "account.enable", "account.remove_admin"}
+SENSITIVE = {"device.restart", "device.shutdown", "device.logoff", "account.disable", "account.enable",
+             "account.remove_admin"}
 
-ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.restart_cancel", "account.disable",
-                     "account.enable", "account.remove_admin"]
+ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.restart_cancel", "device.shutdown",
+                     "device.logoff", "account.disable", "account.enable", "account.remove_admin"]
+
+
+class StepUp(BaseModel):
+    """A fresh passkey assertion confirming a sensitive action (from /auth/step-up/options)."""
+    challenge_id: uuid.UUID
+    credential: dict
 
 
 class ActionRequest(BaseModel):
     command: ActionName
     parameters: dict = Field(default_factory=dict)
     reason: str = Field(min_length=3, max_length=500)
-    confirm_password: str | None = Field(default=None, max_length=256)
+    step_up: StepUp | None = None
 
 
 class ActionOut(ORMModel):
@@ -73,7 +80,7 @@ class ActionOut(ORMModel):
 class AssistRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
     max_minutes: int = Field(default=30, ge=5, le=120)
-    confirm_password: str = Field(min_length=1, max_length=256)
+    step_up: StepUp | None = None
 
 
 class TerminateRequest(BaseModel):

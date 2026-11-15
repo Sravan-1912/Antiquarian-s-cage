@@ -8,7 +8,6 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.schemas.common import ORMModel
 
 Name = Field(min_length=2, max_length=200)
-Password = Field(min_length=1, max_length=256)
 
 
 def _strip(v: str) -> str:
@@ -22,48 +21,24 @@ class RegisterRequest(BaseModel):
     organization_name: str = Name
     full_name: str = Name
     email: EmailStr
-    password: str = Password
 
     _s = field_validator("organization_name", "full_name")(_strip)
 
 
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str = Password
+class RegisterResponse(BaseModel):
+    detail: str
+    enroll_token: str  # single-use token the browser uses to register the first passkey
 
 
-class TokenRequest(BaseModel):
-    token: str = Field(min_length=20, max_length=128)
+class EnrollOptionsRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=100)
 
 
-class ResetPasswordRequest(TokenRequest):
-    new_password: str = Password
-
-
-class AcceptInviteRequest(TokenRequest):
-    password: str = Password
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class ChangePasswordRequest(BaseModel):
-    current_password: str = Password
-    new_password: str = Password
-
-
-class MfaCode(BaseModel):
-    code: str = Field(min_length=6, max_length=8)
-
-
-class MfaDisableRequest(MfaCode):
-    password: str = Password
-
-
-class MfaSetupResponse(BaseModel):
-    secret: str
-    otpauth_uri: str
+class EnrollVerifyRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=100)
+    challenge_id: uuid.UUID
+    credential: dict
+    name: str = Field(default="Passkey", min_length=1, max_length=64)
 
 
 class RoleOut(ORMModel):
@@ -79,13 +54,13 @@ class MeResponse(BaseModel):
     organization_name: str
     roles: list[RoleOut]
     permissions: list[str]
-    mfa_enabled: bool
     email_verified: bool
     last_login_at: datetime | None
 
 
 class LoginResponse(BaseModel):
-    mfa_required: bool
+    # Retained for the passkey/enrol/phone sign-in responses; always false now that passkeys satisfy MFA.
+    mfa_required: bool = False
 
 
 class BootstrapStatus(BaseModel):

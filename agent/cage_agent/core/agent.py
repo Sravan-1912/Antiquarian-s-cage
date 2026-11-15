@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import socket
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -63,9 +64,24 @@ def enroll(paths: AgentPaths, server_url: str, token: str, *, key_scope: str, al
     return cfg
 
 
+
+def network_counters() -> dict:
+    """Cumulative bytes sent/received since boot on all non-loopback adapters (the server derives usage from deltas).
+    Omitted (not zero) if the OS cannot provide them, so missing data is never reported as "no traffic"."""
+    try:
+        per = psutil.net_io_counters(pernic=True)
+    except (OSError, RuntimeError):
+        return {}
+    nics = {k: v for k, v in per.items() if "loopback" not in k.lower() and k.lower() not in ("lo", "lo0")}
+    if not nics:
+        return {}
+    return {"net_bytes_sent": sum(v.bytes_sent for v in nics.values()),
+            "net_bytes_recv": sum(v.bytes_recv for v in nics.values())}
+
 class Agent:
-    def __init__(self, paths: AgentPaths, stop: threading.Event | None = None):
+    def __init__(self, paths: AgentPaths, stop: threading.Event | None = None, *, unlock_relay: str = "on"):
         self.paths = paths
+        self.unlock_relay_mode = unlock_relay  # on | dev | off
         self.stop = stop or threading.Event()
         self.cfg = configuration.load(paths)
         self.cfg.extra["agent_version"] = __version__
@@ -101,7 +117,8 @@ class Agent:
 
     def heartbeat_once(self) -> dict:
         resp = self.client.heartbeat(self.key, {"agent_version": __version__,
-                                                "uptime_seconds": int(time.time() - psutil.boot_time())})
+                                                "uptime_seconds": int(time.time() - psutil.boot_time()),
+                                                **network_counters()})
         self.server_status = resp.get("status", "unknown")
         self.cfg.heartbeat_interval_seconds = max(15, int(resp.get("heartbeat_interval_seconds", 60)))
         self.cfg.inventory_interval_seconds = max(300, int(resp.get("inventory_interval_seconds", 3600)))
@@ -129,6 +146,12 @@ class Agent:
     def run(self) -> int:
         log.info("agent %s started for device %s → %s", __version__, self.cfg.device_id, self.cfg.server_url)
         failures = 0
+        relay = None
+        if self.unlock_relay_mode != "off" and sys.platform == "win32":
+            from cage_agent.unlock import UnlockHandler, UnlockRelay
+            relay = UnlockRelay(UnlockHandler(lambda path, body: self.client._send(path, body, self.key)),
+                                dev_allow_current_user=self.unlock_relay_mode == "dev")
+            relay.start()
         try:
             while not self.stop.is_set():
                 try:
@@ -157,6 +180,8 @@ class Agent:
                 wait = self.cfg.heartbeat_interval_seconds * (1 if failures == 0 else min(10, 2 ** failures))
                 self.stop.wait(wait)
         finally:
+            if relay is not None:
+                relay.close()
             if self.executor.assist is not None:
                 self.executor.assist.end_all()  # never leave an indicator/Quick Assist running unattended
             self.client.close()

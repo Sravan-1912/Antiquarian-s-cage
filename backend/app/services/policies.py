@@ -41,12 +41,13 @@ class PolicyError(Exception):
 
 # --------------------------------------------------------------------------------------------- policies
 def create_policy(db: Session, org_id: uuid.UUID, actor: Actor, *, name: str, description: str, category: str,
-                  configuration: dict) -> EndpointPolicy:
+                  configuration: dict, owner_admin_id: uuid.UUID | None = None) -> EndpointPolicy:
     cfg = validate_config(category, configuration)
     if db.scalar(select(EndpointPolicy.id).where(EndpointPolicy.organization_id == org_id, EndpointPolicy.name == name)):
         raise PolicyError("A policy with this name already exists", 409)
     p = EndpointPolicy(organization_id=org_id, name=name, description=description, category=category,
-                       configuration=cfg, version=1, status="active", created_by=actor.user_id)
+                       configuration=cfg, version=1, status="active", created_by=actor.user_id,
+                       owner_admin_id=owner_admin_id)
     db.add(p)
     db.flush()
     db.add(PolicyRevision(policy_id=p.id, version=1, configuration=cfg, changed_by=actor.user_id))

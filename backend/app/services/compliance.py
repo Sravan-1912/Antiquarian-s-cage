@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import utcnow
@@ -233,14 +233,29 @@ def latest_evaluation(db: Session, device_id: uuid.UUID) -> ComplianceEvaluation
                      .order_by(ComplianceEvaluation.evaluated_at.desc()).limit(1))
 
 
-def org_history(db: Session, org_id: uuid.UUID, days: int = 30) -> list[dict]:
+def latest_evaluations(db: Session, device_ids: list[uuid.UUID]) -> dict[uuid.UUID, ComplianceEvaluation]:
+    """Latest evaluation for many devices in one query (window function; PostgreSQL and SQLite 3.25+)."""
+    if not device_ids:
+        return {}
+    rn = func.row_number().over(partition_by=ComplianceEvaluation.device_id,
+                                order_by=ComplianceEvaluation.evaluated_at.desc()).label("rn")
+    sq = select(ComplianceEvaluation.id, rn).where(ComplianceEvaluation.device_id.in_(device_ids)).subquery()
+    rows = db.scalars(select(ComplianceEvaluation).join(sq, sq.c.id == ComplianceEvaluation.id).where(sq.c.rn == 1))
+    return {e.device_id: e for e in rows}
+
+
+def org_history(db: Session, org_id: uuid.UUID, days: int = 30, owner_admin_id: uuid.UUID | None = None) -> list[dict]:
     """Per day: last evaluation of each device that day → average score and state counts."""
+    from app.models import Device
     start = utcnow() - timedelta(days=days - 1)
     start = datetime(start.year, start.month, start.day, tzinfo=start.tzinfo)
-    rows = db.execute(select(ComplianceEvaluation.device_id, ComplianceEvaluation.evaluated_at,
-                             ComplianceEvaluation.score, ComplianceEvaluation.state)
-                      .where(ComplianceEvaluation.organization_id == org_id, ComplianceEvaluation.evaluated_at >= start)
-                      .order_by(ComplianceEvaluation.evaluated_at)).all()
+    q = (select(ComplianceEvaluation.device_id, ComplianceEvaluation.evaluated_at,
+                ComplianceEvaluation.score, ComplianceEvaluation.state)
+         .where(ComplianceEvaluation.organization_id == org_id, ComplianceEvaluation.evaluated_at >= start)
+         .order_by(ComplianceEvaluation.evaluated_at))
+    if owner_admin_id is not None:  # admin isolation
+        q = q.join(Device, Device.id == ComplianceEvaluation.device_id).where(Device.owner_admin_id == owner_admin_id)
+    rows = db.execute(q).all()
     per_day: dict[str, dict[uuid.UUID, tuple[int, str]]] = {}
     for dev, ts, score, state in rows:
         per_day.setdefault(ts.date().isoformat(), {})[dev] = (score, state)

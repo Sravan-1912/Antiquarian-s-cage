@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from tests.conftest import STRONG, bootstrap_admin, csrf, last_token, login
+from sqlalchemy import select
+from tests.conftest import bootstrap_admin, csrf, invite_and_accept, last_token, login
 from tests.test_endpoints import INVENTORY, FakeAgent, _token
 from tests.test_policies_compliance import SEC
 
@@ -25,21 +26,23 @@ def _sweep():
         return n
 
 
+def _fail_passkey_login(client, authn):
+    """A failed passkey sign-in that still resolves the account (UV flag off -> verification fails)."""
+    o = client.post("/api/v1/auth/passkeys/login/options").json()
+    return client.post("/api/v1/auth/passkeys/login/verify",
+                       json={"challenge_id": o["challenge_id"], "credential": authn.get(o["options"], uv=False)})
+
+
 def test_failed_signins_raise_suspicious_alert_and_notify(client, outbox):
     bootstrap_admin(client, outbox)
+    authn = client._cage_authn["root@example.com"]
+    client.post("/api/v1/auth/logout", headers=csrf(client))
     for _ in range(5):
-        client.post("/api/v1/auth/login", json={"email": "root@example.com", "password": "Wrong-Pass-123"})
+        assert _fail_passkey_login(client, authn).status_code == 401
     from app.core.rate_limit import get_rate_limiter
     get_rate_limiter().reset()
-    # Account is now locked; wait it out by clearing the lock directly, then sign in successfully
-    from app.models import User
-    with _db() as db:
-        u = db.query(User).one()
-        u.locked_until = None
-        db.commit()
-    login(client, "root@example.com")
-    items = _alerts(client)
-    rules = {a["rule_key"]: a for a in items}
+    login(client, "root@example.com")  # a success after failures
+    rules = {a["rule_key"]: a for a in _alerts(client)}
     assert rules["auth_failed_burst"]["kind"] == "suspicious_activity"
     assert "attack" not in rules["auth_failed_burst"]["title"].lower()
     assert "auth_success_after_failures" in rules
@@ -47,13 +50,22 @@ def test_failed_signins_raise_suspicious_alert_and_notify(client, outbox):
     assert any(n["kind"] == "alert.auth_failed_burst" for n in notes)
 
 
-def test_password_spray_from_one_ip(client, outbox):
+def test_password_spray_rule_fires_across_accounts(client, outbox):
+    # Passkey sign-in is usernameless, so a multi-account spray cannot come through the login endpoint; the detection
+    # rule still works on recorded failures (e.g. from SSO), driven here directly through the alert service.
     bootstrap_admin(client, outbox)
-    for i in range(10):
-        client.post("/api/v1/auth/login", json={"email": f"user{i % 4}@example.com", "password": "x"})
-    from app.core.rate_limit import get_rate_limiter
-    get_rate_limiter().reset()
-    login(client, "root@example.com")
+    from app.core.database import utcnow
+    from app.models import AuthenticationEvent, Organization
+    from app.services import alerts
+    with _db() as db:
+        org = db.scalar(select(Organization.id))
+        for i in range(10):
+            db.add(AuthenticationEvent(organization_id=org, event_type="login", success=False,
+                                       email_attempted=f"user{i % 4}@example.com", ip="203.0.113.9",
+                                       created_at=utcnow()))
+        db.flush()
+        alerts.on_failed_login(db, org, "user0@example.com", None, "203.0.113.9")  # evaluate the recorded failures
+        db.commit()
     spray = [a for a in _alerts(client) if a["rule_key"] == "auth_ip_spray"]
     assert spray and spray[0]["severity"] == "high" and len(spray[0]["evidence"]["accounts"]) == 4
 
@@ -161,10 +173,14 @@ def test_investigation_workflow_and_rbac(client, outbox):
     bootstrap_admin(client, outbox)
     login(client, "root@example.com")
     for email, role in (("sa@example.com", "security_analyst"), ("ad@example.com", "admin")):
-        client.post("/api/v1/users", json={"email": email, "full_name": "Some Body", "role": role}, headers=csrf(client))
-        client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+        invite_and_accept(client, outbox, email, role)
+    # Enrol the device under the admin so the resulting alert belongs to the admin's tenant (admin isolation).
+    login(client, "ad@example.com")
+    tok = _token(client)["token"]
+    client.post("/api/v1/auth/logout", headers=csrf(client))
+    login(client, "root@example.com")
     agent = FakeAgent(client)
-    agent.enroll(_token(client)["token"])
+    agent.enroll(tok)
     agent.signed("/agent/v1/inventory", {**INVENTORY, "security": {**SEC, "firewall": {"state": "disabled"}}})
     alert = [a for a in _alerts(client) if a["rule_key"] == "firewall_disabled"][0]
     analysts = client.get("/api/v1/alerts/analysts").json()
@@ -236,8 +252,7 @@ def test_reports_csv_pdf_permissions(client, outbox):
     exported = client.get("/api/v1/audit", params={"action": "report.exported"}).json()["total"]
     assert exported == 9
 
-    client.post("/api/v1/users", json={"email": "ad@example.com", "full_name": "Ad Min", "role": "admin"}, headers=csrf(client))
-    client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+    invite_and_accept(client, outbox, "ad@example.com", "admin", full_name="Ad Min")
     client.post("/api/v1/auth/logout", headers=csrf(client))
     login(client, "ad@example.com")
     cat = {r["key"]: r for r in client.get("/api/v1/reports").json()}

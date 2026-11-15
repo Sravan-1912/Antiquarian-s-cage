@@ -53,6 +53,9 @@ class HeartbeatRequest(_Strict):
     agent_version: Tiny
     uptime_seconds: int | None = Field(default=None, ge=0, le=10 * 365 * 86400)
     logged_in_user: Short | None = None
+    # Cumulative since boot (all non-loopback adapters); usage = deltas between heartbeats.
+    net_bytes_sent: int | None = Field(default=None, ge=0, le=2**62)
+    net_bytes_recv: int | None = Field(default=None, ge=0, le=2**62)
 
 
 class HeartbeatResponse(BaseModel):

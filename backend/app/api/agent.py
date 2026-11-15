@@ -157,3 +157,47 @@ def assist_event(session_id: uuid.UUID, ctx: AgentContext = Depends(agent_auth),
     except PolicyError as e:
         raise HTTPException(e.status, e.message)
     return {"session_id": str(sess.id), "status": sess.status}
+
+
+# ------------------------------------------------------------------------------- Windows sign-in from the phone
+class UnlockStart(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: str
+    windows_user: str
+    sid: str
+    key: str | None = None
+
+
+class UnlockStatus(BaseModel):
+    model_config = {"extra": "forbid"}
+    request_id: uuid.UUID
+    secret: str
+
+
+@router.post("/unlock/start")
+def unlock_start(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Called by the agent on behalf of the local credential provider (lock screen)."""
+    from app.services import windows_unlock as wu
+    req = _parse(UnlockStart, ctx.body)
+    try:
+        st = wu.start(db, ctx.device, kind=req.kind, windows_user=req.windows_user, sid=req.sid, key_b64=req.key,
+                      ip=ctx.ip)
+    except wu.UnlockError as e:
+        db.rollback()
+        raise HTTPException(e.status, {"code": e.code, "message": e.message})
+    db.commit()
+    return {"request_id": str(st.request_id), "number": st.number, "secret": st.secret,
+            "expires_at": st.expires_at, "approver": st.approver}
+
+
+@router.post("/unlock/status")
+def unlock_status(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    from app.services import windows_unlock as wu
+    req = _parse(UnlockStatus, ctx.body)
+    try:
+        out = wu.status(db, ctx.device, req.request_id, req.secret, ctx.ip)
+    except wu.UnlockError as e:
+        db.commit()
+        raise HTTPException(e.status, {"code": e.code, "message": e.message})
+    db.commit()
+    return out

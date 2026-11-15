@@ -5,16 +5,19 @@ import { Alert, Badge, Button, Card, CardHeader, Field, Input, Spinner } from '@
 import { Dialog } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
+import { describePasskeyError, stepUp } from '@/services/passkeys'
 import type { Device, InspectState, RemoteAction, RemoteCommand, RemoteSession } from '@/types/api'
 import { formatDateTime, relativeTime } from '@/utils/format'
 import { SessionStatusBadge, TerminateButton } from './shared'
 
 const LABEL: Record<string, string> = {
   'device.inspect': 'Status inspection', 'device.lock': 'Remote lock', 'device.restart': 'Remote restart',
-  'device.restart_cancel': 'Cancel restart', 'account.disable': 'Disable local account', 'account.enable': 'Enable local account',
+  'device.restart_cancel': 'Cancel restart', 'device.shutdown': 'Power off', 'device.logoff': 'Log off user',
+  'account.disable': 'Disable local account', 'account.enable': 'Enable local account',
   'account.remove_admin': 'Remove from Administrators',
 }
-const SENSITIVE = new Set<RemoteCommand>(['device.restart', 'account.disable', 'account.enable', 'account.remove_admin'])
+const SENSITIVE = new Set<RemoteCommand>(['device.restart', 'device.shutdown', 'device.logoff', 'account.disable', 'account.enable', 'account.remove_admin'])
+const WITH_DELAY = new Set<RemoteCommand>(['device.restart', 'device.shutdown'])
 
 type Pending = { command: RemoteCommand; parameters: Record<string, unknown>; title: string; description: string; danger?: boolean; extra?: ReactNode }
 
@@ -36,7 +39,6 @@ export function RemotePanel({ device }: { device: Device }) {
   const remote = can('devices:remote')
   const [pending, setPending] = useState<Pending | null>(null)
   const [reason, setReason] = useState('')
-  const [password, setPassword] = useState('')
   const [delay, setDelay] = useState(300)
   const [assistOpen, setAssistOpen] = useState(false)
   const [assistMinutes, setAssistMinutes] = useState(30)
@@ -44,17 +46,23 @@ export function RemotePanel({ device }: { device: Device }) {
   const actions = useQuery({ queryKey: ['device', device.id, 'actions'], queryFn: () => api.get<RemoteAction[]>(`/devices/${device.id}/actions`), refetchInterval: 5_000 })
   const sessions = useQuery({ queryKey: ['device', device.id, 'sessions'], queryFn: () => api.get<RemoteSession[]>(`/remote-sessions?device_id=${device.id}&limit=10`), refetchInterval: 5_000 })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['device', device.id] }) }
-  const reset = () => { setPending(null); setReason(''); setPassword(''); setAssistOpen(false) }
+  const reset = () => { setPending(null); setReason(''); setAssistOpen(false) }
 
   const act = useMutation({
-    mutationFn: (p: Pending) => api.post<RemoteAction>(`/devices/${device.id}/actions`, {
-      command: p.command, parameters: p.command === 'device.restart' ? { ...p.parameters, delay_seconds: delay } : p.parameters,
-      reason, ...(SENSITIVE.has(p.command) ? { confirm_password: password } : {}),
-    }),
+    mutationFn: async (p: Pending) => {
+      const step_up = SENSITIVE.has(p.command) ? await stepUp() : undefined  // fresh passkey confirmation
+      return api.post<RemoteAction>(`/devices/${device.id}/actions`, {
+        command: p.command, parameters: WITH_DELAY.has(p.command) ? { ...p.parameters, delay_seconds: delay } : p.parameters,
+        reason, ...(step_up ? { step_up } : {}),
+      })
+    },
     onSuccess: () => { refresh(); reset() },
   })
   const assist = useMutation({
-    mutationFn: () => api.post<RemoteSession>(`/devices/${device.id}/assist`, { reason, max_minutes: assistMinutes, confirm_password: password }),
+    mutationFn: async () => {
+      const step_up = await stepUp()
+      return api.post<RemoteSession>(`/devices/${device.id}/assist`, { reason, max_minutes: assistMinutes, step_up })
+    },
     onSuccess: () => { refresh(); reset() },
   })
 
@@ -88,19 +96,36 @@ export function RemotePanel({ device }: { device: Device }) {
               <Button size="sm" variant="outline" onClick={() => ask('device.inspect', {}, 'Inspect live status', 'Collects uptime, load, signed-in users and local accounts (read-only).')}><Activity />Inspect status</Button>
               <Button size="sm" variant="outline" onClick={() => ask('device.lock', {}, 'Lock the endpoint', 'Locks the screen immediately; the user signs in again to continue. Unsaved work is kept.')}><Lock />Lock</Button>
               <Button size="sm" variant="outline" onClick={() => ask('device.restart', { message: 'Your IT administrator scheduled a restart. Save your work.' }, 'Restart the endpoint', 'Schedules a restart with an on-screen warning. Unsaved work in open applications may be lost.', true)}><Power />Restart</Button>
-              <Button size="sm" variant="ghost" onClick={() => ask('device.restart_cancel', {}, 'Cancel scheduled restart', 'Aborts a pending restart if one is scheduled.')}><PowerOff />Cancel restart</Button>
+              <Button size="sm" variant="ghost" onClick={() => ask('device.restart_cancel', {}, 'Cancel scheduled restart/shutdown', 'Aborts a pending restart or power-off if one is scheduled.')}><PowerOff />Cancel restart</Button>
+              <Button size="sm" variant="outline" onClick={() => ask('device.shutdown', { message: 'Your IT administrator scheduled a shutdown. Save your work.' }, 'Power off the endpoint', 'Schedules a power-off with an on-screen warning. Unsaved work in open applications may be lost; the device goes offline.', true)}><PowerOff />Power off</Button>
+              <Button size="sm" variant="outline" onClick={() => ask('device.logoff', {}, 'Log off the user', 'Ends the active interactive session, returning to the sign-in screen. Unsaved work in open applications may be lost.', true)}><UserX />Log off user</Button>
               <Button size="sm" onClick={() => { assist.reset(); setAssistOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Headset />Remote assistance</Button>
             </div>
           )}
           <div className="border-t border-ink-700 px-4 py-3">
             <div className="mb-2 text-xs font-medium text-silver-500">Live status {latestInspect && <span className="font-normal">· {relativeTime(latestInspect.completed_at ?? latestInspect.issued_at)}</span>}</div>
             {!latestInspect ? <p className="text-xs text-silver-600">Run “Inspect status” to collect a live snapshot.</p> : (
-              <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-sm">
-                <dt className="text-silver-500">Uptime</dt><dd>{fmtUptime(st.uptime_seconds)}</dd>
-                <dt className="text-silver-500">CPU / memory</dt><dd>{st.cpu_percent ?? '—'}% / {st.memory_percent ?? '—'}%</dd>
-                <dt className="text-silver-500">Signed-in users</dt><dd>{st.logged_on_users?.join(', ') || 'none'}</dd>
-                <dt className="text-silver-500">Processes</dt><dd>{st.process_count ?? '—'}</dd>
-              </dl>
+              <>
+                <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-sm">
+                  <dt className="text-silver-500">Uptime</dt><dd>{fmtUptime(st.uptime_seconds)}</dd>
+                  <dt className="text-silver-500">CPU / memory</dt><dd>{st.cpu_percent ?? '—'}% / {st.memory_percent ?? '—'}%</dd>
+                  <dt className="text-silver-500">Signed-in users</dt><dd>{st.logged_on_users?.join(', ') || 'none'}</dd>
+                  <dt className="text-silver-500">Processes</dt><dd>{st.process_count ?? '—'}</dd>
+                </dl>
+                {!!st.top_processes?.length && (
+                  <div className="mt-3">
+                    <div className="mb-1 text-xs font-medium text-silver-500">Top processes · by memory</div>
+                    <ul className="space-y-0.5 text-xs">
+                      {st.top_processes.slice(0, 8).map((p) => (
+                        <li key={p.pid} className="flex items-center justify-between gap-2">
+                          <span className="truncate text-silver-200">{p.name}</span>
+                          <span className="shrink-0 text-silver-500">{p.mem_percent}% · pid {p.pid}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </Card>
@@ -162,16 +187,16 @@ export function RemotePanel({ device }: { device: Device }) {
       <Dialog open={!!pending} onOpenChange={(o) => !o && reset()} title={pending?.title ?? ''} description={pending?.description}>
         {pending && (
           <form onSubmit={(e: FormEvent) => { e.preventDefault(); act.mutate(pending) }} className="space-y-3">
-            {act.error && <Alert>{describeError(act.error)}</Alert>}
-            {pending.command === 'device.restart' && (
+            {act.error && <Alert>{describePasskeyError(act.error) ?? describeError(act.error)}</Alert>}
+            {WITH_DELAY.has(pending.command) && (
               <Field label="Warning delay before restart (seconds)" htmlFor="rd"><Input id="rd" type="number" min={60} max={3600} value={delay} onChange={(e) => setDelay(Number(e.target.value))} /></Field>
             )}
             <Field label="Reason (shown in the audit log)" htmlFor="rr"><Input id="rr" required minLength={3} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
             {SENSITIVE.has(pending.command) && (
-              <Field label="Confirm with your password" htmlFor="rp"><Input id="rp" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+              <p className="text-xs text-silver-500">When you send, you'll confirm with your <span className="text-silver-300">passkey</span> (Windows Hello, your phone or a security key).</p>
             )}
             <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={reset}>Cancel</Button>
-              <Button type="submit" variant={pending.danger ? 'danger' : 'primary'} loading={act.isPending}>Send signed command</Button></div>
+              <Button type="submit" variant={pending.danger ? 'danger' : 'primary'} loading={act.isPending}>Confirm with passkey &amp; send</Button></div>
           </form>
         )}
       </Dialog>
@@ -179,11 +204,11 @@ export function RemotePanel({ device }: { device: Device }) {
       <Dialog open={assistOpen} onOpenChange={(o) => !o && reset()} title="Request remote assistance"
         description="The person at the endpoint is asked to allow the session (unless your organisation disabled consent). A red banner stays on their screen for the whole session and they can end it at any time. Screen sharing uses Windows Quick Assist, opened only after consent.">
         <form onSubmit={(e: FormEvent) => { e.preventDefault(); assist.mutate() }} className="space-y-3">
-          {assist.error && <Alert>{describeError(assist.error)}</Alert>}
+          {assist.error && <Alert>{describePasskeyError(assist.error) ?? describeError(assist.error)}</Alert>}
           <Field label="Reason (shown to the user)" htmlFor="ar"><Input id="ar" required minLength={5} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
           <Field label="Maximum duration (minutes)" htmlFor="am"><Input id="am" type="number" min={5} max={120} value={assistMinutes} onChange={(e) => setAssistMinutes(Number(e.target.value))} /></Field>
-          <Field label="Confirm with your password" htmlFor="ap"><Input id="ap" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-          <div className="flex justify-end"><Button type="submit" loading={assist.isPending}><Headset />Send request</Button></div>
+          <p className="text-xs text-silver-500">When you send, you'll confirm with your <span className="text-silver-300">passkey</span>.</p>
+          <div className="flex justify-end"><Button type="submit" loading={assist.isPending}><Headset />Confirm &amp; send request</Button></div>
         </form>
       </Dialog>
     </div>

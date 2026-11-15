@@ -14,8 +14,7 @@ from app.api.devices import _get as get_device
 from app.core.database import get_db
 from app.models import CommandJob, Device, RemoteSession
 from app.schemas import remote as s
-from app.security.passwords import verify_password
-from app.services import audit, remote
+from app.services import audit, passkeys, remote
 from app.services.policies import PolicyError
 
 router = APIRouter(tags=["remote"])
@@ -27,13 +26,15 @@ def _raise(e: PolicyError):
     raise HTTPException(e.status, e.message)
 
 
-def _reauth(db: Session, ctx: AuthContext, password: str | None, what: str) -> None:
-    """Explicit authorisation for sensitive actions: the operator re-enters their password."""
-    if not password or not verify_password(ctx.user.password_hash, password):
+def _reauth(db: Session, ctx: AuthContext, step_up: s.StepUp | None, what: str) -> None:
+    """Explicit authorisation for a sensitive action: a fresh passkey confirmation (step-up), not a cached session."""
+    ok = step_up is not None and passkeys.verify_step_up(db, ctx.user, step_up.challenge_id, step_up.credential,
+                                                         ctx.client)
+    if not ok:
         audit.record(db, ctx.user.organization_id, ctx.actor, "remote.reauth_failed", result="denied",
                      metadata={"action": what})
         db.commit()
-        raise HTTPException(403, "Password confirmation failed")
+        raise HTTPException(403, "Passkey confirmation failed")
 
 
 def _action_out(db: Session, j: CommandJob) -> s.ActionOut:
@@ -55,7 +56,7 @@ def create_action(device_id: uuid.UUID, body: s.ActionRequest, ctx: AuthContext 
                   db: Session = Depends(get_db)):
     device = get_device(db, ctx, device_id)
     if body.command in s.SENSITIVE:
-        _reauth(db, ctx, body.confirm_password, body.command)
+        _reauth(db, ctx, body.step_up, body.command)
     try:
         job = remote.create_action(db, device, body.command, body.parameters, body.reason.strip(), ctx.actor)
     except ValidationError as exc:
@@ -82,7 +83,7 @@ def request_assist(device_id: uuid.UUID, body: s.AssistRequest, ctx: AuthContext
     cfg = remote.assist_settings(db, ctx.user.organization_id)
     if "devices:read" not in ctx.permissions and not cfg.allow_it_support:
         raise HTTPException(403, "Remote assistance by IT support is disabled by organisation policy")
-    _reauth(db, ctx, body.confirm_password, "assist.start")
+    _reauth(db, ctx, body.step_up, "assist.start")
     try:
         sess = remote.request_session(db, device, body.reason.strip(), body.max_minutes, ctx.actor)
     except PolicyError as e:

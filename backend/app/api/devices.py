@@ -20,7 +20,7 @@ from app.models import (
 )
 from app.schemas import endpoints as s
 from app.schemas.common import Page
-from app.services import audit, devices
+from app.services import audit, devices, subscriptions, tenancy
 from app.services.devices import DeviceError
 
 router = APIRouter(tags=["endpoints"])
@@ -29,6 +29,7 @@ READ = require_permission("devices:read", "devices:read_assigned", any_of=True)
 
 def _scope(stmt, ctx: AuthContext):
     stmt = stmt.where(Device.organization_id == ctx.user.organization_id)
+    stmt = tenancy.restrict(stmt, Device.owner_admin_id, ctx)  # admin isolation (no-op for Super Admin)
     if "devices:read" not in ctx.permissions:  # IT support: only endpoints assigned to them
         stmt = stmt.where(Device.support_owner_id == ctx.user.id)
     return stmt
@@ -41,14 +42,24 @@ def _get(db: Session, ctx: AuthContext, device_id: uuid.UUID) -> Device:
     return d
 
 
-def _out(db: Session, d: Device) -> s.DeviceOut:
+def _out(db: Session, d: Device, names: dict | None = None) -> s.DeviceOut:
     o = s.DeviceOut.model_validate(d)
     o.connectivity = devices.connectivity(d)
     o.online = o.connectivity == "online"
     if d.employee_id:
-        emp = db.get(Employee, d.employee_id)
-        o.employee_name = emp.full_name if emp else None
+        if names is not None:
+            o.employee_name = names.get(d.employee_id)
+        else:
+            emp = db.get(Employee, d.employee_id)
+            o.employee_name = emp.full_name if emp else None
     return o
+
+
+def _employee_names(db: Session, rows) -> dict:
+    ids = {d.employee_id for d in rows if d.employee_id}
+    if not ids:
+        return {}
+    return dict(db.execute(select(Employee.id, Employee.full_name).where(Employee.id.in_(ids))).all())
 
 
 def _raise(e: DeviceError):
@@ -58,8 +69,9 @@ def _raise(e: DeviceError):
 # ------------------------------------------------------------------------------------------- enrollment tokens
 @router.get("/enrollment-tokens", response_model=list[s.EnrollmentTokenOut])
 def list_tokens(ctx: AuthContext = Depends(require_permission("devices:manage")), db: Session = Depends(get_db)):
-    rows = db.scalars(select(EnrollmentToken).where(EnrollmentToken.organization_id == ctx.user.organization_id)
-                      .order_by(EnrollmentToken.created_at.desc()).limit(100)).all()
+    rows = db.scalars(tenancy.restrict(
+        select(EnrollmentToken).where(EnrollmentToken.organization_id == ctx.user.organization_id),
+        EnrollmentToken.owner_admin_id, ctx).order_by(EnrollmentToken.created_at.desc()).limit(100)).all()
     out = []
     for t in rows:
         o = s.EnrollmentTokenOut.model_validate(t)
@@ -73,12 +85,18 @@ def create_token(body: s.EnrollmentTokenCreate, ctx: AuthContext = Depends(requi
                  db: Session = Depends(get_db)):
     if body.employee_id:
         emp = db.get(Employee, body.employee_id)
-        if emp is None or emp.organization_id != ctx.user.organization_id:
+        if emp is None or emp.organization_id != ctx.user.organization_id or not tenancy.can_see(ctx, emp.owner_admin_id):
             raise HTTPException(404, "Employee not found")
         if emp.status in ("suspended", "offboarded"):
             raise HTTPException(409, f"Cannot enrol a device for a {emp.status} employee")
+    # Friendly pre-check: surface a full quota before issuing a token the agent could not use. Enrolment re-checks.
+    u = subscriptions.usage(db, ctx.user.organization_id, tenancy.owner_for(ctx))
+    if u["at_limit"]:
+        raise HTTPException(402, f"Device quota reached ({u['used']}/{u['limit']} endpoints on the {u['plan']} plan). "
+                                 "Remove an endpoint or upgrade the plan before enrolling another.")
     tok, raw = devices.create_enrollment_token(db, ctx.user.organization_id, ctx.actor, label=body.label,
-                                               employee_id=body.employee_id, minutes=body.expires_in_minutes)
+                                               employee_id=body.employee_id, minutes=body.expires_in_minutes,
+                                               owner_admin_id=tenancy.owner_for(ctx))
     db.commit()
     return s.EnrollmentTokenCreated(**s.EnrollmentTokenOut.model_validate(tok).model_dump(), token=raw)
 
@@ -87,7 +105,7 @@ def create_token(body: s.EnrollmentTokenCreate, ctx: AuthContext = Depends(requi
 def revoke_token(token_id: uuid.UUID, ctx: AuthContext = Depends(require_permission("devices:manage")),
                  db: Session = Depends(get_db)):
     t = db.get(EnrollmentToken, token_id)
-    if t is None or t.organization_id != ctx.user.organization_id:
+    if t is None or t.organization_id != ctx.user.organization_id or not tenancy.can_see(ctx, t.owner_admin_id):
         raise HTTPException(404, "Token not found")
     if devices.token_state(t) != "active":
         raise HTTPException(409, "Only active tokens can be revoked")
@@ -132,7 +150,8 @@ def list_devices(
     stmt = _filtered(ctx, q, status, connectivity, employee_id)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(stmt.order_by(Device.hostname, Device.id).offset((page - 1) * page_size).limit(page_size)).all()
-    return Page(items=[_out(db, d) for d in rows], total=total, page=page, page_size=page_size)
+    names = _employee_names(db, rows)
+    return Page(items=[_out(db, d, names) for d in rows], total=total, page=page, page_size=page_size)
 
 
 @router.get("/devices/export.csv")
@@ -147,8 +166,9 @@ def export_devices(
     w = csv.writer(buf)
     w.writerow(["device_id", "hostname", "status", "connectivity", "employee", "os", "os_version", "manufacturer",
                 "model", "serial", "agent_version", "enrolled_at", "last_heartbeat_at", "last_seen_ip"])
+    names = _employee_names(db, rows)
     for d in rows:
-        o = _out(db, d)
+        o = _out(db, d, names)
         w.writerow([_safe(v) for v in (d.id, d.hostname, d.status, o.connectivity, o.employee_name or "", d.os_name,
                                        d.os_version, d.manufacturer, d.model, d.serial_number, d.agent_version,
                                        d.enrolled_at.isoformat(), d.last_heartbeat_at.isoformat()
@@ -182,6 +202,15 @@ def device_events(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: Se
     _get(db, ctx, device_id)
     return db.scalars(select(DeviceEvent).where(DeviceEvent.device_id == device_id)
                       .order_by(DeviceEvent.created_at.desc()).limit(200)).all()
+
+
+@router.get("/devices/{device_id}/network")
+def device_network(device_id: uuid.UUID, hours: int = Query(24, ge=1, le=720), ctx: AuthContext = Depends(READ),
+                   db: Session = Depends(get_db)):
+    d = _get(db, ctx, device_id)
+    u = devices.network_usage(db, d.organization_id, hours, device_id=d.id)
+    u.pop("per_device", None)
+    return u
 
 
 @router.get("/devices/{device_id}/heartbeats", response_model=list[s.HeartbeatOut])

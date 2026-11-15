@@ -48,7 +48,7 @@ export function AdministratorsPage() {
       <Card>
         {users.isLoading ? <div className="p-6"><Spinner /></div> : users.error ? <div className="p-4"><Alert>{describeError(users.error)}</Alert></div> : (
           <Table>
-            <thead><tr><Th>Administrator</Th><Th>Role</Th><Th>Status</Th><Th>MFA</Th><Th>Last sign-in</Th>{manage && <Th className="w-10" />}</tr></thead>
+            <thead><tr><Th>Administrator</Th><Th>Role</Th><Th>Status</Th><Th>Last sign-in</Th>{manage && <Th className="w-10" />}</tr></thead>
             <tbody>
               {users.data!.map((u) => {
                 const locked = u.locked_until && new Date(u.locked_until) > new Date()
@@ -57,7 +57,6 @@ export function AdministratorsPage() {
                     <Td><div className="text-silver-50">{u.full_name}{u.id === me?.id && <span className="ml-1.5 text-xs text-silver-500">(you)</span>}</div><div className="text-xs text-silver-500">{u.email}</div></Td>
                     <Td>{u.roles.map((r) => <Badge key={r.key} className="mr-1">{r.name}</Badge>)}</Td>
                     <Td><Badge tone={statusTone(u.status)}>{u.status}</Badge>{locked && <Badge tone="danger" className="ml-1">locked</Badge>}</Td>
-                    <Td>{u.mfa_enabled ? <Badge tone="success">enabled</Badge> : <Badge tone="warning">off</Badge>}</Td>
                     <Td className="text-silver-400">{formatDateTime(u.last_login_at)}</Td>
                     {manage && (
                       <Td>

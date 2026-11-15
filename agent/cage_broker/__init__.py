@@ -9,4 +9,4 @@ remote clients, and for every request:
   3. stores rollback state in its own SYSTEM-only directory (never accepts rollback data from the agent).
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
