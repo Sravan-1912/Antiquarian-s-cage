@@ -106,12 +106,34 @@ def inspect(_: dict) -> Outcome:
 
 # --------------------------------------------------------------------------------------------------- lock
 def lock(_: dict) -> Outcome:
-    if not shutil.which("loginctl"):
-        return Outcome("needs_attention", "loginctl not available (no systemd-logind) — cannot lock sessions")
-    r = _run(["loginctl", "lock-sessions"])
-    if r.returncode != 0:
-        return Outcome("failed", f"loginctl lock-sessions failed: {(r.stderr or r.stdout).strip()[:200]}")
-    return Outcome("succeeded", "Graphical sessions locked")
+    """Lock the interactive session. `loginctl lock-sessions` only signals logind (a desktop with no active locker,
+    e.g. a root XFCE session, just blanks), so prefer `dm-tool lock` (the display manager actually switches to the
+    greeter) and fall back through the common lockers. Returns on the first method that reports success."""
+    # (command, human label, extra env). dm-tool needs the seat; harmless when already set.
+    attempts = [
+        (["dm-tool", "lock"], "display manager (dm-tool)"),
+        (["loginctl", "lock-sessions"], "systemd-logind"),
+        (["xdg-screensaver", "lock"], "xdg-screensaver"),
+        (["xfce4-screensaver-command", "--lock"], "xfce4-screensaver"),
+        (["light-locker-command", "--lock"], "light-locker"),
+    ]
+    tried, errors = [], []
+    for cmd, label in attempts:
+        if not shutil.which(cmd[0]):
+            continue
+        tried.append(label)
+        try:
+            r = _run(cmd)
+        except FileNotFoundError:
+            continue
+        if r.returncode == 0:
+            return Outcome("succeeded", f"Screen locked via {label}")
+        errors.append(f"{cmd[0]}: {(r.stderr or r.stdout).strip()[:80]}")
+    if not tried:
+        return Outcome("needs_attention", "No screen locker found (install a display manager or light-locker/"
+                                           "xscreensaver and run it in the desktop session)")
+    return Outcome("needs_attention", "Lock signalled but no locker confirmed it (" + "; ".join(errors or tried)[:200]
+                                      + "). On a root desktop session, lockers often blank without locking.")
 
 
 # --------------------------------------------------------------------------------------------------- restart
