@@ -10,6 +10,7 @@ USERNAME = re.compile(r"^[A-Za-z0-9._\- ]{1,20}$")
 ROUTE = {
     "policy.apply": "broker", "policy.remove": "broker",
     "device.inspect": "agent", "device.lock": "agent", "device.restart": "broker", "device.restart_cancel": "broker",
+    "device.shutdown": "broker", "device.logoff": "broker",
     "account.disable": "broker", "account.enable": "broker", "account.remove_admin": "broker",
     "assist.start": "agent", "assist.end": "agent",
 }
@@ -35,9 +36,9 @@ def validate_command_params(command: str, p) -> dict:
         raise ValueError("parameters must be an object")
     for k in COMMON & set(p):
         _str(p, k, 500)
-    if command in ("device.inspect", "device.lock", "device.restart_cancel"):
+    if command in ("device.inspect", "device.lock", "device.restart_cancel", "device.logoff"):
         _keys(p, set())
-    elif command == "device.restart":
+    elif command in ("device.restart", "device.shutdown"):
         _keys(p, {"delay_seconds", "message"})
         d = p.get("delay_seconds")
         if not isinstance(d, int) or isinstance(d, bool) or not 60 <= d <= 3600:

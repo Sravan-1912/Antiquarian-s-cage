@@ -11,10 +11,12 @@ import { SessionStatusBadge, TerminateButton } from './shared'
 
 const LABEL: Record<string, string> = {
   'device.inspect': 'Status inspection', 'device.lock': 'Remote lock', 'device.restart': 'Remote restart',
-  'device.restart_cancel': 'Cancel restart', 'account.disable': 'Disable local account', 'account.enable': 'Enable local account',
+  'device.restart_cancel': 'Cancel restart', 'device.shutdown': 'Power off', 'device.logoff': 'Log off user',
+  'account.disable': 'Disable local account', 'account.enable': 'Enable local account',
   'account.remove_admin': 'Remove from Administrators',
 }
-const SENSITIVE = new Set<RemoteCommand>(['device.restart', 'account.disable', 'account.enable', 'account.remove_admin'])
+const SENSITIVE = new Set<RemoteCommand>(['device.restart', 'device.shutdown', 'device.logoff', 'account.disable', 'account.enable', 'account.remove_admin'])
+const WITH_DELAY = new Set<RemoteCommand>(['device.restart', 'device.shutdown'])
 
 type Pending = { command: RemoteCommand; parameters: Record<string, unknown>; title: string; description: string; danger?: boolean; extra?: ReactNode }
 
@@ -48,7 +50,7 @@ export function RemotePanel({ device }: { device: Device }) {
 
   const act = useMutation({
     mutationFn: (p: Pending) => api.post<RemoteAction>(`/devices/${device.id}/actions`, {
-      command: p.command, parameters: p.command === 'device.restart' ? { ...p.parameters, delay_seconds: delay } : p.parameters,
+      command: p.command, parameters: WITH_DELAY.has(p.command) ? { ...p.parameters, delay_seconds: delay } : p.parameters,
       reason, ...(SENSITIVE.has(p.command) ? { confirm_password: password } : {}),
     }),
     onSuccess: () => { refresh(); reset() },
@@ -88,7 +90,9 @@ export function RemotePanel({ device }: { device: Device }) {
               <Button size="sm" variant="outline" onClick={() => ask('device.inspect', {}, 'Inspect live status', 'Collects uptime, load, signed-in users and local accounts (read-only).')}><Activity />Inspect status</Button>
               <Button size="sm" variant="outline" onClick={() => ask('device.lock', {}, 'Lock the endpoint', 'Locks the screen immediately; the user signs in again to continue. Unsaved work is kept.')}><Lock />Lock</Button>
               <Button size="sm" variant="outline" onClick={() => ask('device.restart', { message: 'Your IT administrator scheduled a restart. Save your work.' }, 'Restart the endpoint', 'Schedules a restart with an on-screen warning. Unsaved work in open applications may be lost.', true)}><Power />Restart</Button>
-              <Button size="sm" variant="ghost" onClick={() => ask('device.restart_cancel', {}, 'Cancel scheduled restart', 'Aborts a pending restart if one is scheduled.')}><PowerOff />Cancel restart</Button>
+              <Button size="sm" variant="ghost" onClick={() => ask('device.restart_cancel', {}, 'Cancel scheduled restart/shutdown', 'Aborts a pending restart or power-off if one is scheduled.')}><PowerOff />Cancel restart</Button>
+              <Button size="sm" variant="outline" onClick={() => ask('device.shutdown', { message: 'Your IT administrator scheduled a shutdown. Save your work.' }, 'Power off the endpoint', 'Schedules a power-off with an on-screen warning. Unsaved work in open applications may be lost; the device goes offline.', true)}><PowerOff />Power off</Button>
+              <Button size="sm" variant="outline" onClick={() => ask('device.logoff', {}, 'Log off the user', 'Ends the active interactive session, returning to the sign-in screen. Unsaved work in open applications may be lost.', true)}><UserX />Log off user</Button>
               <Button size="sm" onClick={() => { assist.reset(); setAssistOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Headset />Remote assistance</Button>
             </div>
           )}
@@ -163,7 +167,7 @@ export function RemotePanel({ device }: { device: Device }) {
         {pending && (
           <form onSubmit={(e: FormEvent) => { e.preventDefault(); act.mutate(pending) }} className="space-y-3">
             {act.error && <Alert>{describeError(act.error)}</Alert>}
-            {pending.command === 'device.restart' && (
+            {WITH_DELAY.has(pending.command) && (
               <Field label="Warning delay before restart (seconds)" htmlFor="rd"><Input id="rd" type="number" min={60} max={3600} value={delay} onChange={(e) => setDelay(Number(e.target.value))} /></Field>
             )}
             <Field label="Reason (shown in the audit log)" htmlFor="rr"><Input id="rr" required minLength={3} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>

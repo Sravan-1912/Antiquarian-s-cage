@@ -150,7 +150,41 @@ def restart(p: dict) -> Outcome:
 def restart_cancel(_: dict) -> Outcome:
     r = _run(["shutdown", "-c"])
     # shutdown -c returns non-zero when nothing is scheduled; treat that as success (idempotent).
-    return Outcome("succeeded", "Scheduled restart cancelled (if any was pending)")
+    return Outcome("succeeded", "Scheduled restart/shutdown cancelled (if any was pending)")
+
+
+# --------------------------------------------------------------------------------------------------- shutdown
+def shutdown(p: dict) -> Outcome:
+    delay, msg = int(p["delay_seconds"]), str(p["message"])
+    minutes = max(1, math.ceil(delay / 60))
+    r = _run(["shutdown", "-h", f"+{minutes}", msg[:200]])
+    if r.returncode != 0:
+        return Outcome("failed", f"shutdown exit {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}")
+    return Outcome("succeeded", f"Power-off scheduled in ~{minutes} min with a broadcast warning; cancellable", {},
+                   {"shutdown_in_seconds": minutes * 60})
+
+
+# ----------------------------------------------------------------------------------------------------- log off
+def logoff(_: dict) -> Outcome:
+    """Log off the active graphical session's user via logind."""
+    if not shutil.which("loginctl"):
+        return Outcome("needs_attention", "loginctl not available (no systemd-logind)")
+    r = _run(["loginctl", "list-sessions", "--no-legend"])
+    active = None
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        info = _run(["loginctl", "show-session", parts[0], "-p", "Active", "-p", "Type"]).stdout
+        if "Active=yes" in info and ("Type=x11" in info or "Type=wayland" in info):
+            active = parts[0]
+            break
+    if active is None:
+        return Outcome("needs_attention", "No active graphical session to log off")
+    rr = _run(["loginctl", "terminate-session", active])
+    if rr.returncode != 0:
+        return Outcome("failed", f"terminate-session failed: {(rr.stderr or rr.stdout).strip()[:200]}")
+    return Outcome("succeeded", f"Logged off active session {active}")
 
 
 # --------------------------------------------------------------------------------------------------- accounts
@@ -207,6 +241,7 @@ def close_quick_assist(_: dict) -> Outcome:
 
 HANDLERS = {
     "device.inspect": inspect, "device.lock": lock, "device.restart": restart, "device.restart_cancel": restart_cancel,
+    "device.shutdown": shutdown, "device.logoff": logoff,
     "account.disable": account_disable, "account.enable": account_enable, "account.remove_admin": account_remove_admin,
     "assist.end": close_quick_assist,
 }

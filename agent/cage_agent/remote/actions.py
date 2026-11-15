@@ -111,6 +111,31 @@ def restart_cancel(_: dict) -> Outcome:
     return Outcome("succeeded", "Scheduled restart cancelled")
 
 
+def shutdown(p: dict) -> Outcome:
+    delay, msg = int(p["delay_seconds"]), str(p["message"])
+    r = _shutdown(["/s", "/t", str(delay), "/c", msg[:200], "/d", "p:4:1"])  # planned: application maintenance
+    if r.returncode == 1190:  # a shutdown is already scheduled
+        return Outcome("needs_attention", "A restart/shutdown is already scheduled on this device")
+    if r.returncode != 0:
+        return Outcome("failed", f"shutdown.exe exit {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}")
+    return Outcome("succeeded", f"Power-off scheduled in {delay} s with an on-screen warning; cancellable", {},
+                   {"shutdown_in_seconds": delay})
+
+
+def logoff(_: dict) -> Outcome:
+    import win32ts
+    console = win32ts.WTSGetActiveConsoleSessionId()
+    if console == 0xFFFFFFFF:
+        return Outcome("needs_attention", "No interactive user session to log off")
+    try:
+        win32ts.WTSLogoffSession(win32ts.WTS_CURRENT_SERVER_HANDLE, console, False)
+    except Exception as exc:  # pywintypes.error
+        if getattr(exc, "winerror", None) == 5:
+            raise ElevationRequired("logging off another session requires SYSTEM/administrator") from exc
+        raise
+    return Outcome("succeeded", f"Logged off console session {console}")
+
+
 # ---------------------------------------------------------------------------------------------- accounts
 def _accounts() -> tuple[list[dict], set[str]]:
     users = run(LOCAL_USERS) or []
@@ -180,6 +205,7 @@ def close_quick_assist(_: dict) -> Outcome:
 
 HANDLERS = {
     "device.inspect": inspect, "device.lock": lock, "device.restart": restart, "device.restart_cancel": restart_cancel,
+    "device.shutdown": shutdown, "device.logoff": logoff,
     "account.disable": account_disable, "account.enable": account_enable, "account.remove_admin": account_remove_admin,
     "assist.end": close_quick_assist,
 }

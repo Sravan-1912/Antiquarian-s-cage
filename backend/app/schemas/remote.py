@@ -38,14 +38,15 @@ class AccountParams(_P):
 
 ACTION_SCHEMAS: dict[str, type[_P]] = {
     "device.inspect": NoParams, "device.lock": NoParams, "device.restart": RestartParams,
-    "device.restart_cancel": NoParams, "account.disable": AccountParams, "account.enable": AccountParams,
-    "account.remove_admin": AccountParams,
+    "device.restart_cancel": NoParams, "device.shutdown": RestartParams, "device.logoff": NoParams,
+    "account.disable": AccountParams, "account.enable": AccountParams, "account.remove_admin": AccountParams,
 }
 # Actions that change the device's availability or accounts need the operator to re-enter their password.
-SENSITIVE = {"device.restart", "account.disable", "account.enable", "account.remove_admin"}
+SENSITIVE = {"device.restart", "device.shutdown", "device.logoff", "account.disable", "account.enable",
+             "account.remove_admin"}
 
-ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.restart_cancel", "account.disable",
-                     "account.enable", "account.remove_admin"]
+ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.restart_cancel", "device.shutdown",
+                     "device.logoff", "account.disable", "account.enable", "account.remove_admin"]
 
 
 class StepUp(BaseModel):
