@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card, CardHeader, Field, Input, Spinner } from '@
 import { Dialog } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
+import { describePasskeyError, stepUp } from '@/services/passkeys'
 import type { Device, InspectState, RemoteAction, RemoteCommand, RemoteSession } from '@/types/api'
 import { formatDateTime, relativeTime } from '@/utils/format'
 import { SessionStatusBadge, TerminateButton } from './shared'
@@ -38,7 +39,6 @@ export function RemotePanel({ device }: { device: Device }) {
   const remote = can('devices:remote')
   const [pending, setPending] = useState<Pending | null>(null)
   const [reason, setReason] = useState('')
-  const [password, setPassword] = useState('')
   const [delay, setDelay] = useState(300)
   const [assistOpen, setAssistOpen] = useState(false)
   const [assistMinutes, setAssistMinutes] = useState(30)
@@ -46,17 +46,23 @@ export function RemotePanel({ device }: { device: Device }) {
   const actions = useQuery({ queryKey: ['device', device.id, 'actions'], queryFn: () => api.get<RemoteAction[]>(`/devices/${device.id}/actions`), refetchInterval: 5_000 })
   const sessions = useQuery({ queryKey: ['device', device.id, 'sessions'], queryFn: () => api.get<RemoteSession[]>(`/remote-sessions?device_id=${device.id}&limit=10`), refetchInterval: 5_000 })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['device', device.id] }) }
-  const reset = () => { setPending(null); setReason(''); setPassword(''); setAssistOpen(false) }
+  const reset = () => { setPending(null); setReason(''); setAssistOpen(false) }
 
   const act = useMutation({
-    mutationFn: (p: Pending) => api.post<RemoteAction>(`/devices/${device.id}/actions`, {
-      command: p.command, parameters: WITH_DELAY.has(p.command) ? { ...p.parameters, delay_seconds: delay } : p.parameters,
-      reason, ...(SENSITIVE.has(p.command) ? { confirm_password: password } : {}),
-    }),
+    mutationFn: async (p: Pending) => {
+      const step_up = SENSITIVE.has(p.command) ? await stepUp() : undefined  // fresh passkey confirmation
+      return api.post<RemoteAction>(`/devices/${device.id}/actions`, {
+        command: p.command, parameters: WITH_DELAY.has(p.command) ? { ...p.parameters, delay_seconds: delay } : p.parameters,
+        reason, ...(step_up ? { step_up } : {}),
+      })
+    },
     onSuccess: () => { refresh(); reset() },
   })
   const assist = useMutation({
-    mutationFn: () => api.post<RemoteSession>(`/devices/${device.id}/assist`, { reason, max_minutes: assistMinutes, confirm_password: password }),
+    mutationFn: async () => {
+      const step_up = await stepUp()
+      return api.post<RemoteSession>(`/devices/${device.id}/assist`, { reason, max_minutes: assistMinutes, step_up })
+    },
     onSuccess: () => { refresh(); reset() },
   })
 
@@ -166,16 +172,16 @@ export function RemotePanel({ device }: { device: Device }) {
       <Dialog open={!!pending} onOpenChange={(o) => !o && reset()} title={pending?.title ?? ''} description={pending?.description}>
         {pending && (
           <form onSubmit={(e: FormEvent) => { e.preventDefault(); act.mutate(pending) }} className="space-y-3">
-            {act.error && <Alert>{describeError(act.error)}</Alert>}
+            {act.error && <Alert>{describePasskeyError(act.error) ?? describeError(act.error)}</Alert>}
             {WITH_DELAY.has(pending.command) && (
               <Field label="Warning delay before restart (seconds)" htmlFor="rd"><Input id="rd" type="number" min={60} max={3600} value={delay} onChange={(e) => setDelay(Number(e.target.value))} /></Field>
             )}
             <Field label="Reason (shown in the audit log)" htmlFor="rr"><Input id="rr" required minLength={3} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
             {SENSITIVE.has(pending.command) && (
-              <Field label="Confirm with your password" htmlFor="rp"><Input id="rp" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+              <p className="text-xs text-silver-500">When you send, you'll confirm with your <span className="text-silver-300">passkey</span> (Windows Hello, your phone or a security key).</p>
             )}
             <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={reset}>Cancel</Button>
-              <Button type="submit" variant={pending.danger ? 'danger' : 'primary'} loading={act.isPending}>Send signed command</Button></div>
+              <Button type="submit" variant={pending.danger ? 'danger' : 'primary'} loading={act.isPending}>Confirm with passkey &amp; send</Button></div>
           </form>
         )}
       </Dialog>
@@ -183,11 +189,11 @@ export function RemotePanel({ device }: { device: Device }) {
       <Dialog open={assistOpen} onOpenChange={(o) => !o && reset()} title="Request remote assistance"
         description="The person at the endpoint is asked to allow the session (unless your organisation disabled consent). A red banner stays on their screen for the whole session and they can end it at any time. Screen sharing uses Windows Quick Assist, opened only after consent.">
         <form onSubmit={(e: FormEvent) => { e.preventDefault(); assist.mutate() }} className="space-y-3">
-          {assist.error && <Alert>{describeError(assist.error)}</Alert>}
+          {assist.error && <Alert>{describePasskeyError(assist.error) ?? describeError(assist.error)}</Alert>}
           <Field label="Reason (shown to the user)" htmlFor="ar"><Input id="ar" required minLength={5} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
           <Field label="Maximum duration (minutes)" htmlFor="am"><Input id="am" type="number" min={5} max={120} value={assistMinutes} onChange={(e) => setAssistMinutes(Number(e.target.value))} /></Field>
-          <Field label="Confirm with your password" htmlFor="ap"><Input id="ap" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-          <div className="flex justify-end"><Button type="submit" loading={assist.isPending}><Headset />Send request</Button></div>
+          <p className="text-xs text-silver-500">When you send, you'll confirm with your <span className="text-silver-300">passkey</span>.</p>
+          <div className="flex justify-end"><Button type="submit" loading={assist.isPending}><Headset />Confirm &amp; send request</Button></div>
         </form>
       </Dialog>
     </div>
