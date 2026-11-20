@@ -58,10 +58,22 @@ def secure_boot(errors) -> dict:
     return {"state": "enabled" if data is True else "disabled", "detail": None, "data": {}}
 
 
+def _is_home_edition() -> bool:
+    try:
+        import platform
+        return (platform.win32_edition() or "").lower().startswith("core")  # Core / CoreSingleLanguage = Home
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def bitlocker(errors) -> dict:
     data, err = _query("bitlocker", errors)
     if err or not data:
-        return _unknown(err or "BitLocker cmdlets unavailable (e.g. Windows Home edition)")
+        # Windows Home has no BitLocker at all, so it is NOT_APPLICABLE (excluded from the compliance score),
+        # not UNKNOWN. Only report unknown when BitLocker could exist but we could not read it (e.g. elevation).
+        if _is_home_edition() or (err and ("not recognized" in err.lower() or "not supported" in err.lower())):
+            return {"state": "not_applicable", "detail": "Windows Home edition does not support BitLocker", "data": {}}
+        return _unknown(err or "BitLocker status unavailable")
     prot = str(data.get("ProtectionStatus"))
     return {"state": "enabled" if prot == "On" else "disabled", "detail": None,
             "data": {"mount_point": str(data.get("MountPoint"))[:16], "volume_status": str(data.get("VolumeStatus"))[:64],
