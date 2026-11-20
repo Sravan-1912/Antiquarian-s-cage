@@ -90,6 +90,11 @@ def raise_alert(db: Session, org_id: uuid.UUID, rule_key: str, *, title: str, de
     db.add(AlertEvent(alert_id=a.id, kind="created", actor_label="detection", details={"rule": rule_key}))
     if severity in NOTIFY_AT:
         _notify(db, a)
+    try:  # SIEM egress (best-effort enqueue into the durable outbox; never fails the alert)
+        from app.services import siem
+        siem.enqueue(db, org_id, siem.alert_payload(a), severity)
+    except Exception:  # noqa: BLE001
+        pass
     return a
 
 

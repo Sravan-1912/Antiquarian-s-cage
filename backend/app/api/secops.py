@@ -251,3 +251,61 @@ def put_prefs(body: list[PrefIn], ctx: AuthContext = Depends(current_context), d
                  metadata={p.category: {"in_app": p.in_app, "email": p.email, "min": p.min_severity} for p in body})
     db.commit()
     return get_prefs(ctx, db)
+
+
+# --------------------------------------------------------------------------------- SIEM / webhook egress
+SIEM_SETTINGS = require_permission("org:settings")
+
+
+class SiemConfigIn(BaseModel):
+    url: str = Field(min_length=8, max_length=2048)
+    auth_header: str = Field(default="Authorization", max_length=64)
+    token: str | None = Field(default=None, max_length=1024)  # write-only; omit to keep the existing token
+    enabled: bool = True
+    min_severity: Literal["low", "medium", "high", "critical"] = "low"
+
+
+def _siem_out(dest) -> dict:
+    return {"url": dest.url, "auth_header": dest.auth_header, "enabled": dest.enabled,
+            "min_severity": dest.min_severity, "has_token": dest.token_enc is not None,
+            "last_success_at": dest.last_success_at, "last_error": dest.last_error}
+
+
+@router.put("/siem")
+def put_siem(body: SiemConfigIn, ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    """Configure SIEM / webhook egress: security alerts are POSTed (JSON) to this destination. Token is write-only."""
+    from app.core.config import get_settings
+    from app.models import SiemDestination
+    from app.services import siem
+    url = body.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(422, "url must be http(s)")
+    if get_settings().environment == "production" and not url.lower().startswith("https://"):
+        raise HTTPException(422, "SIEM URL must be https in production")
+    org = ctx.user.organization_id
+    dest = siem.destination(db, org)
+    if dest is None:
+        dest = SiemDestination(id=uuid.uuid4(), organization_id=org, url=url)
+        db.add(dest)
+    dest.url, dest.auth_header = url, (body.auth_header or "Authorization")
+    dest.enabled, dest.min_severity, dest.updated_at = body.enabled, body.min_severity, utcnow()
+    if body.token is not None:
+        dest.token_enc = siem.encrypt_token(body.token) if body.token else None
+    audit.record(db, org, ctx.actor, "siem.configured", target_type="organization", target_id=org,
+                 target_label=None, metadata={"url": url, "enabled": body.enabled, "min_severity": body.min_severity})
+    db.commit()
+    return _siem_out(dest)
+
+
+@router.get("/siem")
+def get_siem(ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    from app.services import siem
+    dest = siem.destination(db, ctx.user.organization_id)
+    return _siem_out(dest) if dest else None
+
+
+@router.post("/siem/test")
+def test_siem(ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    """Send a one-off test event to the configured destination and report the result."""
+    from app.services import siem
+    return siem.send_test(db, ctx.user.organization_id)

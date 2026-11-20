@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import utcnow
@@ -72,6 +72,39 @@ class EmailOutbox(UUIDPk, Base):
     to_address: Mapped[str] = mapped_column(String(320))
     subject: Mapped[str] = mapped_column(String(255))
     body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(12), default="pending")  # pending | sent | failed
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    next_attempt_at: Mapped[datetime] = mapped_column(default=utcnow)
+    sent_at: Mapped[datetime | None]
+
+
+class SiemDestination(UUIDPk, Base):
+    """Per-organization SIEM / webhook egress config. Security alerts are POSTed here as JSON so a SOC's
+    Splunk/Elastic/Datadog receives them. The token is stored AES-256-GCM-encrypted (never returned to the client)."""
+
+    __tablename__ = "siem_destinations"
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), unique=True)
+    url: Mapped[str] = mapped_column(String(2048))
+    auth_header: Mapped[str] = mapped_column(String(64), default="Authorization")
+    token_enc: Mapped[str | None] = mapped_column(Text)        # encrypted bearer / HEC token, or NULL
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    min_severity: Mapped[str] = mapped_column(String(12), default="low")  # low | medium | high | critical
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_success_at: Mapped[datetime | None]
+    last_error: Mapped[str | None] = mapped_column(String(500))
+
+
+class SiemDelivery(UUIDPk, Base):
+    """Durable outbox for SIEM egress — committed with the alert transaction, delivered by the scheduler with retries,
+    so a SIEM outage never silently drops a security event."""
+
+    __tablename__ = "siem_deliveries"
+    __table_args__ = (Index("ix_siem_deliv_status_next", "status", "next_attempt_at"),)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(12), default="pending")  # pending | sent | failed
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(String(500))
