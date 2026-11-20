@@ -153,41 +153,48 @@ def enrol_passkey(client, token: str, email_addr: str, name: str = "Test device"
     return authn
 
 
-def bootstrap_admin(client, outbox: Path, email_addr: str = "root@example.com") -> None:
-    """Passwordless first-run: create the org + Super Admin and register their passkey. Leaves the client signed in."""
+ROOT_PW = "Root-Passw0rd-9x"
+ADMIN_PW = "Admin-Passw0rd-7y"
+
+
+def bootstrap_admin(client, outbox: Path, email_addr: str = "root@example.com", password: str = ROOT_PW) -> None:
+    """First-run: create the org + Super Admin with a password. Leaves the client signed in."""
     r = client.post("/api/v1/auth/register", json={
-        "organization_name": "Acme Corp", "full_name": "Ada Root", "email": email_addr})
+        "organization_name": "Acme Corp", "full_name": "Ada Root", "email": email_addr, "password": password})
     assert r.status_code == 201, r.text
-    enrol_passkey(client, r.json()["enroll_token"], email_addr, "Root device")
+    client._cage_authn[email_addr] = password
 
 
-def invite_and_accept(client, outbox: Path, email_addr: str, role: str, full_name: str = "Some Body") -> None:
-    """Invite an administrator and enrol their passkey, WITHOUT changing the current session (the inviter stays
-    signed in). Afterwards login(client, email_addr) signs in as the new user."""
+def invite_and_accept(client, outbox: Path, email_addr: str, role: str, full_name: str = "Some Body",
+                      password: str = ADMIN_PW) -> None:
+    """Create an administrator (temporary password) and complete the handover: the new admin signs in with the temp
+    password and sets a permanent one, WITHOUT disturbing the inviter's session. Afterwards login(client, email_addr)
+    signs in as the new user."""
     r = client.post("/api/v1/users", json={"email": email_addr, "full_name": full_name, "role": role},
                     headers=csrf(client))
     assert r.status_code == 201, r.text
-    token = last_token(outbox, "/accept-invite")
+    temp = r.json()["temporary_password"]
     saved = [(c.name, c.value, c.domain, c.path) for c in client.cookies.jar]  # keep domain/path to avoid conflicts
     client.cookies.clear()
-    enrol_passkey(client, token, email_addr, "Invited device")  # sets the invitee's session
+    lr = client.post("/api/v1/auth/login", json={"email": email_addr, "password": temp})
+    assert lr.status_code == 200, lr.text
+    cp = client.post("/api/v1/auth/password", json={"current_password": temp, "new_password": password},
+                     headers=csrf(client))
+    assert cp.status_code == 200, cp.text
     client.cookies.clear()
     for name, value, domain, path in saved:
         client.cookies.set(name, value, domain=domain, path=path)  # restore the inviter's session
+    client._cage_authn[email_addr] = password
 
 
 def step_up(client, email_addr: str) -> dict:
-    """A fresh passkey assertion confirming a sensitive action (remote commands), for the signed-in account."""
-    authn = client._cage_authn[email_addr]
-    o = client.post("/api/v1/auth/step-up/options", headers=csrf(client)).json()
-    return {"challenge_id": o["challenge_id"], "credential": authn.get(o["options"])}
+    """Password re-entry confirming a sensitive action (remote commands), for the signed-in account."""
+    return {"password": client._cage_authn[email_addr]}
 
 
 def login(client, email_addr: str, password: str | None = None) -> dict:
-    """Passkey sign-in using the account's remembered authenticator (bootstrap/invite/enrol registered it)."""
-    authn = client._cage_authn[email_addr]
-    o = client.post("/api/v1/auth/passkeys/login/options").json()
-    r = client.post("/api/v1/auth/passkeys/login/verify",
-                    json={"challenge_id": o["challenge_id"], "credential": authn.get(o["options"])})
+    """Password sign-in; sets this account's session cookie on the client."""
+    pw = password or client._cage_authn[email_addr]
+    r = client.post("/api/v1/auth/login", json={"email": email_addr, "password": pw})
     assert r.status_code == 200, r.text
     return r.json()

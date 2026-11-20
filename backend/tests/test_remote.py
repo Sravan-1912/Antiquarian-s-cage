@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from app.security import command_signing
-from tests.conftest import SoftAuthenticator, bootstrap_admin, csrf, invite_and_accept, login, step_up
+from tests.conftest import bootstrap_admin, csrf, invite_and_accept, login, step_up
 from tests.test_endpoints import FakeAgent, _token
 
 
@@ -25,9 +25,8 @@ def _act(client, agent, command, params=None, step=None, reason="ticket 4711"):
 
 
 def _bad_step(client):
-    """A step-up assertion from an authenticator that is not the user's -> confirmation must fail."""
-    o = client.post("/api/v1/auth/step-up/options", headers=csrf(client)).json()
-    return {"challenge_id": o["challenge_id"], "credential": SoftAuthenticator().get(o["options"])}
+    """A wrong password -> sensitive-action confirmation must fail."""
+    return {"password": "not-the-real-password"}
 
 
 def _next_job(agent):
@@ -106,6 +105,60 @@ def test_session_denied_and_admin_termination(client, outbox):
     agent.signed(f"/agent/v1/jobs/{end['job_id']}/result", {"status": "succeeded"})
     s = client.get(f"/api/v1/remote-sessions/{s['id']}").json()
     assert s["status"] == "ended" and s["ended_by"] == "administrator"
+
+
+def test_rdp_unattended_session_lifecycle(client, outbox):
+    agent = _setup(client, outbox)
+    # Unattended RDP: no password step-up and no consent flag, but the session still carries a mandatory banner on
+    # the endpoint (enforced agent-side: it fails closed if the banner cannot be shown).
+    r = client.post(f"/api/v1/devices/{agent.device_id}/rdp",
+                    json={"reason": "Server maintenance window", "max_minutes": 20}, headers=csrf(client))
+    assert r.status_code == 201, r.text
+    s = r.json()
+    assert s["mode"] == "rdp" and s["require_consent"] is False and s["status"] == "requested"
+    assert client.post(f"/api/v1/devices/{agent.device_id}/rdp", json={"reason": "again now", "max_minutes": 20},
+                       headers=csrf(client)).status_code == 409  # one open session per endpoint
+
+    env = _next_job(agent)
+    assert env["command"] == "rdp.start" and env["parameters"]["requested_by"] == "root@example.com"
+    # Endpoint enabled RDP + showed the banner, and reports the address to connect to.
+    agent.signed(f"/agent/v1/jobs/{env['job_id']}/result",
+                 {"status": "succeeded", "current_state": {"connection": "192.168.1.20:3389"}})
+    s = client.get(f"/api/v1/remote-sessions/{s['id']}").json()
+    assert s["status"] == "active" and s["connection"] == "192.168.1.20:3389" and s["expires_at"]
+
+    r = client.post(f"/api/v1/remote-sessions/{s['id']}/terminate", json={"reason": "done"}, headers=csrf(client))
+    assert r.json()["status"] == "ending"
+    end = _next_job(agent)
+    assert end["command"] == "rdp.end" and end["parameters"]["session_id"] == s["id"]
+    agent.signed(f"/agent/v1/jobs/{end['job_id']}/result", {"status": "succeeded"})
+    assert client.get(f"/api/v1/remote-sessions/{s['id']}").json()["status"] == "ended"
+    actions = {a["action"] for a in client.get("/api/v1/audit", params={"action": "remote.rdp"}).json()["items"]}
+    assert {"remote.rdp_requested", "remote.rdp_started"} <= actions
+
+
+def test_rdp_relay_pipes_bytes_and_rejects_bad_token(client, outbox):
+    from app.services.rdp_relay import mint_token
+    sid = "11111111-1111-1111-1111-111111111111"
+    et, ot = mint_token(sid, "endpoint"), mint_token(sid, "operator")
+
+    # A forged/mismatched token is refused before the socket is accepted.
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(f"/agent/v1/rdp/tunnel?session={sid}&token=forged"):
+            pass
+    with pytest.raises(WebSocketDisconnect):  # operator token cannot be used on the endpoint side
+        with client.websocket_connect(f"/agent/v1/rdp/tunnel?session={sid}&token={ot}"):
+            pass
+
+    # Valid tokens on both sides: the relay copies bytes each way between the two sockets.
+    with client.websocket_connect(f"/agent/v1/rdp/tunnel?session={sid}&token={et}") as endpoint, \
+         client.websocket_connect(f"/api/v1/rdp/tunnel?session={sid}&token={ot}") as operator:
+        operator.send_bytes(b"client-hello (RDP)")
+        assert endpoint.receive_bytes() == b"client-hello (RDP)"
+        endpoint.send_bytes(b"server-hello (RDP)")
+        assert operator.receive_bytes() == b"server-hello (RDP)"
 
 
 def test_session_expiry_and_offline_and_cancel(client, outbox):

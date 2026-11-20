@@ -32,12 +32,40 @@ class AdminUserOut(ORMModel):
     roles: list[RoleOut]
 
 
-class InviteAdminRequest(BaseModel):
+class CreateAdminRequest(BaseModel):
     email: EmailStr
     full_name: str = Field(min_length=2, max_length=200)
     role: Literal["super_admin", "admin", "security_analyst", "it_support"]
 
     _c = field_validator("full_name")(_clean)
+
+
+class AdminCreatedOut(BaseModel):
+    """Returned once when a Super Admin creates an admin: the account plus the temporary password to hand over."""
+    user: AdminUserOut
+    temporary_password: str
+
+
+class HandoverOut(BaseModel):
+    """Returned once when a Super Admin regenerates an admin's temporary password for handover."""
+    user_id: uuid.UUID
+    email: str
+    temporary_password: str
+
+
+class CreateOrganizationRequest(BaseModel):
+    organization_name: str = Field(min_length=2, max_length=200)
+    super_admin_email: EmailStr
+    super_admin_full_name: str = Field(min_length=2, max_length=200)
+
+    _c = field_validator("organization_name", "super_admin_full_name")(_clean)
+
+
+class OrganizationCreatedOut(BaseModel):
+    organization_id: uuid.UUID
+    organization_name: str
+    super_admin_email: str
+    temporary_password: str
 
 
 class SetRolesRequest(BaseModel):
@@ -120,6 +148,12 @@ class EmployeeEventOut(ORMModel):
     details: dict
     actor_id: uuid.UUID | None
     created_at: datetime
+
+
+class PortalAccessOut(BaseModel):
+    """Returned once when an employee is granted portal access: the employee plus the temporary password to hand over."""
+    employee: EmployeeOut
+    temporary_password: str
 
 
 # ------------------------------------------------------------------ audit / notifications

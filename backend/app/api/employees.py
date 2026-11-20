@@ -16,7 +16,14 @@ from app.api.deps import AuthContext, require_permission
 from app.core.database import get_db
 from app.core.database import utcnow
 from app.models import ApplicationAssignment, Employee, EmployeeEvent, User, UserRole, WebAuthnCredential
-from app.schemas.admin import EmployeeCreate, EmployeeEventOut, EmployeeOut, EmployeeUpdate, LifecycleRequest
+from app.schemas.admin import (
+    EmployeeCreate,
+    EmployeeEventOut,
+    EmployeeOut,
+    EmployeeUpdate,
+    LifecycleRequest,
+    PortalAccessOut,
+)
 from app.schemas.common import Page
 from app.services import audit, auth, notifications, tenancy
 
@@ -267,12 +274,12 @@ def offboard(emp_id: uuid.UUID, body: LifecycleRequest,
 
 
 # --------------------------------------------------------------------------------------------- portal accounts
-@router.post("/{emp_id}/portal-access", response_model=EmployeeOut)
+@router.post("/{emp_id}/portal-access", response_model=PortalAccessOut)
 def grant_portal_access(emp_id: uuid.UUID, ctx: AuthContext = Depends(require_permission("employees:lifecycle")),
                         db: Session = Depends(get_db)):
-    """Creates the employee's own sign-in (role: Employee) and emails a single-use invitation."""
-    from app.services import email, rbac
-    from app.services.email import EmailDeliveryError
+    """Create the employee's own sign-in (role: Employee) with a temporary password to hand over. The employee must
+    change it on first sign-in. The password is shown ONCE and never stored in clear."""
+    from app.services import rbac
 
     emp = _get(db, ctx, emp_id)
     if emp.status != "active":
@@ -282,24 +289,20 @@ def grant_portal_access(emp_id: uuid.UUID, ctx: AuthContext = Depends(require_pe
     if auth.find_user_by_email(db, emp.organization_id, emp.email):
         raise HTTPException(409, "An account with this email already exists (administrator accounts cannot be reused)")
     user = User(organization_id=emp.organization_id, email=emp.email.lower(), full_name=emp.full_name,
-                status="pending")
+                status="active")
     db.add(user)
     db.flush()
     role = rbac.get_role(db, "employee")
     db.add(UserRole(user_id=user.id, role_id=role.id, granted_by=ctx.user.id))
     emp.user_id = user.id
-    raw = auth.issue_invite(db, user)
-    db.add(EmployeeEvent(employee_id=emp.id, kind="update", actor_id=ctx.user.id, details={"portal_access": {"from": None, "to": "invited"}}))
-    audit.record(db, emp.organization_id, ctx.actor, "employee.portal_invited", target_type="employee",
+    temp = auth.set_temporary_password(db, user)
+    db.add(EmployeeEvent(employee_id=emp.id, kind="update", actor_id=ctx.user.id,
+                         details={"portal_access": {"from": None, "to": "created"}}))
+    audit.record(db, emp.organization_id, ctx.actor, "employee.portal_created", target_type="employee",
                  target_id=emp.id, target_label=emp.email)
     db.commit()
-    try:
-        email.send_email(user.email, "Your Antiquarian's Cage account",
-                         f"Hello {emp.full_name},\n\nActivate your workspace account (devices, applications, "
-                         f"passkeys):\n{email.link('/accept-invite', raw)}")
-    except EmailDeliveryError:
-        raise HTTPException(502, "Account created, but the invitation email could not be sent")
-    return emp
+    db.refresh(emp)
+    return PortalAccessOut(employee=EmployeeOut.model_validate(emp), temporary_password=temp)
 
 
 @router.delete("/{emp_id}/portal-access", response_model=EmployeeOut)

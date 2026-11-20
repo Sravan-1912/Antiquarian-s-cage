@@ -134,4 +134,10 @@ class UnlockRelay:
                 return {"ok": False, "code": "forbidden", "message": "Not allowed."}
             return self.handler.handle(req)
 
-        pipe.serve(guarded, extra, self.stop, name=PIPE_NAME, include_admins=False, pass_handle=True)
+        try:
+            pipe.serve(guarded, extra, self.stop, name=PIPE_NAME, include_admins=False, pass_handle=True)
+        except Exception as exc:  # noqa: BLE001 - the relay is optional; never take the agent down with it
+            # The lock-screen unlock relay needs the SYSTEM-only pipe, which only the agent *service* can create.
+            # A standalone, non-elevated `cage-agent run` can't (CreateNamedPipe -> access denied), and that is fine:
+            # lock-screen unlock simply stays off. Log one line instead of dumping a thread traceback.
+            log.warning("unlock relay unavailable (lock-screen unlock needs the agent service); continuing without it: %s", exc)

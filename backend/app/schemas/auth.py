@@ -17,28 +17,30 @@ def _strip(v: str) -> str:
     return v
 
 
+Password = Field(min_length=1, max_length=200)
+
+
 class RegisterRequest(BaseModel):
     organization_name: str = Name
     full_name: str = Name
     email: EmailStr
+    password: str = Password
 
     _s = field_validator("organization_name", "full_name")(_strip)
 
 
 class RegisterResponse(BaseModel):
     detail: str
-    enroll_token: str  # single-use token the browser uses to register the first passkey
 
 
-class EnrollOptionsRequest(BaseModel):
-    token: str = Field(min_length=10, max_length=100)
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Password
 
 
-class EnrollVerifyRequest(BaseModel):
-    token: str = Field(min_length=10, max_length=100)
-    challenge_id: uuid.UUID
-    credential: dict
-    name: str = Field(default="Passkey", min_length=1, max_length=64)
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Password
+    new_password: str = Password
 
 
 class RoleOut(ORMModel):
@@ -56,11 +58,13 @@ class MeResponse(BaseModel):
     permissions: list[str]
     email_verified: bool
     last_login_at: datetime | None
+    must_change_password: bool = False
 
 
 class LoginResponse(BaseModel):
-    # Retained for the passkey/enrol/phone sign-in responses; always false now that passkeys satisfy MFA.
     mfa_required: bool = False
+    # True when the account signed in with a temporary password and must set a new one before continuing.
+    must_change_password: bool = False
 
 
 class BootstrapStatus(BaseModel):

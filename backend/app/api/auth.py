@@ -50,52 +50,45 @@ def bootstrap_status(db: Session = Depends(get_db)):
 
 @router.post("/register", response_model=s.RegisterResponse, status_code=201,
              dependencies=[Depends(rate_limit("register", 5))])
-def register(body: s.RegisterRequest, request: Request, db: Session = Depends(get_db)):
-    """Create the first Super Admin (passwordless). Closed once any user exists; further admins are invited. Returns
-    a single-use enrol token the browser uses to register the first passkey via /auth/enroll/*."""
+def register(body: s.RegisterRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    """First-run setup: create the organisation and its first Super Admin with a password, and sign them in. Closed
+    once any user exists; further organisations and admins are created by a Super Admin."""
     try:
-        _, enroll = auth.register_first_admin(db, org_name=body.organization_name, full_name=body.full_name,
-                                              email_addr=str(body.email), client=client_info(request))
-    except AuthError as e:
-        _raise(e)
-    return s.RegisterResponse(detail="Organisation created. Register your passkey to finish.", enroll_token=enroll)
-
-
-@router.post("/enroll/options", dependencies=[Depends(rate_limit("enroll", 20))])
-def enroll_options(body: s.EnrollOptionsRequest, db: Session = Depends(get_db)):
-    """Registration-ceremony options for a passwordless enrol/invite/recovery token (no session needed)."""
-    from app.services import passkeys
-    try:
-        user, _purpose = auth.peek_enroll_user(db, body.token)
-    except AuthError as e:
-        _raise(e)
-    challenge_id, options = passkeys.registration_options(db, user)
-    return {"challenge_id": str(challenge_id), "options": options}
-
-
-@router.post("/enroll/verify", response_model=s.LoginResponse, dependencies=[Depends(rate_limit("enroll", 20))])
-def enroll_verify(body: s.EnrollVerifyRequest, request: Request, response: Response, db: Session = Depends(get_db)):
-    """Register the passkey, activate the account, and sign in. Replaces password set-up for bootstrap/invite/recovery."""
-    from app.services import passkeys
-    client = client_info(request)
-    try:
-        user, purpose = auth.peek_enroll_user(db, body.token)
-        if purpose == "passkey_recovery":
-            passkeys.revoke_all(db, user, auth.Actor("user", user.id, user.email, client.ip))
-        passkeys.register(db, user, body.challenge_id, body.credential, body.name, client)  # owns WebAuthn verify
-        result = auth.complete_enroll(db, body.token, user, purpose, client)
+        result = auth.register_first_admin(db, org_name=body.organization_name, full_name=body.full_name,
+                                           email_addr=str(body.email), password=body.password,
+                                           client=client_info(request))
+    except auth.PasswordPolicyError as e:
+        raise HTTPException(422, str(e))
     except AuthError as e:
         _raise(e)
     _set_cookies(response, result.session_token, result.csrf_token)
-    return s.LoginResponse(mfa_required=False)
+    return s.RegisterResponse(detail="Organisation created. You are signed in.")
 
 
-@router.post("/step-up/options")
-def step_up_options(ctx: AuthContext = Depends(current_context), db: Session = Depends(get_db)):
-    """Assertion options for a fresh-passkey confirmation of a sensitive action (e.g. a remote command)."""
-    from app.services import passkeys
-    challenge_id, options = passkeys.step_up_options(db, ctx.user)
-    return {"challenge_id": str(challenge_id), "options": options}
+@router.post("/login", response_model=s.LoginResponse, dependencies=[Depends(rate_limit("login", 10))])
+def login(body: s.LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    """Password sign-in. On success a session cookie is set; `must_change_password` tells the client to force a
+    password change (temporary password from a Super Admin handover)."""
+    try:
+        result = auth.login_with_password(db, str(body.email), body.password, client_info(request))
+    except AuthError as e:
+        _raise(e)
+    _set_cookies(response, result.session_token, result.csrf_token)
+    return s.LoginResponse(must_change_password=result.must_change_password)
+
+
+@router.post("/password", response_model=Message)
+def change_password(body: s.ChangePasswordRequest, ctx: AuthContext = Depends(current_context),
+                    db: Session = Depends(get_db)):
+    """Change your own password (also used to clear a forced change after a handover). Signs out other sessions."""
+    try:
+        auth.change_password(db, ctx.user, body.current_password, body.new_password, ctx.client,
+                             keep_session_id=ctx.session.id)
+    except auth.PasswordPolicyError as e:
+        raise HTTPException(422, str(e))
+    except AuthError as e:
+        _raise(e)
+    return Message(detail="Password changed")
 
 
 @router.post("/logout", response_model=Message)
@@ -114,6 +107,7 @@ def me(ctx: AuthContext = Depends(current_context), db: Session = Depends(get_db
         organization_name=org.name if org else "", roles=[s.RoleOut.model_validate(r) for r in u.roles],
         permissions=sorted(ctx.permissions),
         email_verified=u.email_verified_at is not None, last_login_at=u.last_login_at,
+        must_change_password=u.must_change_password,
     )
 
 

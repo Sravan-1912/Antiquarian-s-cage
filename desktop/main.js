@@ -4,15 +4,54 @@
 // loopback port, polls /api/v1/health, then opens the console in a BrowserWindow. The
 // backend is killed when the app quits. Only one instance may run at a time.
 
-const { app, BrowserWindow, Menu, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
+const net = require("net");
 const path = require("path");
 const fs = require("fs");
+const WebSocket = require("ws");
 
 let backend = null;
 let backendPort = null;
 let mainWindow = null;
+let appOrigin = null;  // the backend origin the console is loaded from (loopback or a remote/cloud backend)
+
+// --- RDP relay: tunnel a local mstsc connection out to the backend relay --------------------------
+// mstsc → 127.0.0.1:<localPort> (this listener) → WebSocket to <origin>/api/v1/rdp/tunnel → backend relay → endpoint.
+// Works across any network: both ends dial out, so no inbound firewall rule is needed anywhere.
+function startRdpTunnel({ sessionId, token, tunnelPath }) {
+  return new Promise((resolve, reject) => {
+    const wsBase = appOrigin.replace(/^http/, "ws").replace(/\/$/, "");
+    const wsUrl = `${wsBase}${tunnelPath}?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(token)}`;
+    const server = net.createServer((socket) => {
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = "nodebuffer";
+      const queue = [];
+      let open = false;
+      ws.on("open", () => { open = true; for (const d of queue) ws.send(d); queue.length = 0; });
+      ws.on("message", (d) => socket.write(d));
+      ws.on("close", () => socket.destroy());
+      ws.on("error", () => socket.destroy());
+      socket.on("data", (d) => { if (open && ws.readyState === WebSocket.OPEN) ws.send(d); else queue.push(d); });
+      socket.on("close", () => { try { ws.close(); } catch (_) {} server.close(); });
+      socket.on("error", () => { try { ws.close(); } catch (_) {} });
+    });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const port = server.address().port;
+      // Launch the system Remote Desktop client at the local end of the tunnel.
+      try { spawn("mstsc", [`/v:127.0.0.1:${port}`], { detached: true, stdio: "ignore" }).unref(); }
+      catch (err) { server.close(); reject(err); return; }
+      // Close the listener if nothing connects shortly (mstsc failed to launch / was cancelled).
+      setTimeout(() => { if (!server._connected) { try { server.close(); } catch (_) {} } }, 60000);
+      server.on("connection", () => { server._connected = true; });
+      resolve({ port });
+    });
+  });
+}
+
+ipcMain.handle("cage-rdp-connect", async (_e, info) => startRdpTunnel(info));
 
 // --- locate the backend executable -------------------------------------------------------------
 function backendExePath() {
@@ -88,7 +127,8 @@ function stopBackend() {
 }
 
 // --- window ------------------------------------------------------------------------------------
-function createWindow(port) {
+function createWindow(origin) {
+  appOrigin = origin;
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -106,14 +146,14 @@ function createWindow(port) {
 
   // External links (http/https to other origins) open in the system browser, not inside the app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(`http://127.0.0.1:${port}`)) {
+    if (!url.startsWith(origin)) {
       shell.openExternal(url);
       return { action: "deny" };
     }
     return { action: "allow" };
   });
 
-  mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+  mainWindow.loadURL(`${origin}/`);
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
@@ -131,9 +171,16 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     try {
-      const port = await startBackend();
-      await waitForHealth(port);
-      createWindow(port);
+      // Remote-backend mode: attach to a shared/cloud backend (so endpoints on other networks are reachable and
+      // RDP relays through it) instead of spawning the bundled local backend.
+      const remote = (process.env.CAGE_REMOTE_BACKEND_URL || "").trim().replace(/\/$/, "");
+      if (remote) {
+        createWindow(remote);
+      } else {
+        const port = await startBackend();
+        await waitForHealth(port);
+        createWindow(`http://127.0.0.1:${port}`);
+      }
     } catch (err) {
       dialog.showErrorBox("Antiquarian's Cage", `Could not start the application.\n\n${err.message}`);
       stopBackend();

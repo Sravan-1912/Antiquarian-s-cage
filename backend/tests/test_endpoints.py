@@ -5,6 +5,7 @@ import base64
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -152,6 +153,22 @@ def test_bad_csr_and_tokens(client, outbox):
     assert agent.enroll(tok["token"]).status_code == 201
     states = {t["id"]: t["state"] for t in client.get("/api/v1/enrollment-tokens").json()}
     assert states[tok["id"]] == "used" and states[t2["id"]] == "revoked"
+
+
+def test_indefinite_enrollment_token_never_expires(client, outbox):
+    _admin(client, outbox)
+    # expires_in_minutes=None → a token that never expires ("indefinite").
+    tok = _token(client, expires_in_minutes=None)
+    assert tok["expires_at"] is None
+    assert tok["state"] == "active"
+    # Still active and usable well past any normal expiry window.
+    from app.core.database import utcnow
+    import app.services.devices as dev
+    far_future = utcnow() + timedelta(days=3650)
+    with mock.patch.object(dev, "utcnow", lambda: far_future):
+        rows = {t["id"]: t["state"] for t in client.get("/api/v1/enrollment-tokens").json()}
+        assert rows[tok["id"]] == "active"
+    assert FakeAgent(client).enroll(tok["token"]).status_code == 201
 
 
 def test_lifecycle_suspend_revoke_unenroll(client, outbox):

@@ -1,10 +1,10 @@
-"""Break-glass passkey recovery: `python -m app.recover <email>`
+"""Break-glass password recovery: `python -m app.recover <email>`
 
-Run on the server by whoever controls it (the same trust level as database access). Mints a single-use, 1-hour
-recovery link so the named account can register a fresh passkey, even if every passkey is lost and no other admin
-can issue recovery. This is the ultimate way back in under admin-issued-only recovery — keep it to the host.
+Run on the server by whoever controls it (the same trust level as database access). Sets a single-use temporary
+password for the named account — the ultimate way back in when a Super Admin is locked out and no other admin can
+reset them. The account must change the password on next sign-in.
 
-It prints the link; it never emails. Open the link in a browser to complete the passkey registration.
+It prints the temporary password; it never emails. Keep this to the host.
 """
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from sqlalchemy import func, select
 from app.core.database import session_factory
 from app.models import User
 from app.services import auth
-from app.services.email import link as email_link
 
 
 def main(email_addr: str) -> int:
@@ -28,17 +27,16 @@ def main(email_addr: str) -> int:
         if user.status == "disabled":
             print(f"{email_addr} is disabled; re-enable it first.", file=sys.stderr)
             return 1
-        raw = auth.issue_recovery(db, user)
+        temp = auth.set_temporary_password(db, user)
+        auth.revoke_user_sessions(db, user.id, "break_glass_recovery")
         from app.services import audit
         audit.record(db, user.organization_id, auth.Actor("system", None, "break-glass", None),
-                     "user.recovery_issued", target_type="user", target_id=user.id, target_label=user.email,
+                     "user.password_reset", target_type="user", target_id=user.id, target_label=user.email,
                      metadata={"method": "break_glass_cli"})
         db.commit()
-    url = email_link("/recover", raw)  # already an absolute URL (PUBLIC_BASE_URL + path)
-    print("Break-glass recovery link (valid 1 hour, single use):")
-    print(url)
-    print("\nOpen it in a browser and register a new passkey. All existing passkeys for this account are revoked "
-          "when the new one is enrolled.")
+    print(f"Break-glass temporary password for {email_addr} (single use — must be changed on next sign-in):")
+    print(f"\n    {temp}\n")
+    print("Sign in with it at the console; you will be prompted to set a new password.")
     return 0
 
 

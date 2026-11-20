@@ -10,6 +10,16 @@ export interface Me {
   permissions: string[]
   email_verified: boolean
   last_login_at: string | null
+  must_change_password: boolean
+}
+
+export interface AdminCreated { user: AdminUser; temporary_password: string }
+export interface Handover { user_id: string; email: string; temporary_password: string }
+export interface OrganizationCreated {
+  organization_id: string
+  organization_name: string
+  super_admin_email: string
+  temporary_password: string
 }
 
 export interface Page<T> { items: T[]; total: number; page: number; page_size: number }
@@ -212,7 +222,7 @@ export interface EnrollmentToken {
   label: string
   employee_id: string | null
   created_at: string
-  expires_at: string
+  expires_at: string | null
   used_at: string | null
   used_by_device_id: string | null
   revoked_at: string | null
@@ -339,6 +349,8 @@ export interface RemoteSession {
   device_name: string | null
   requested_by_label: string
   reason: string
+  mode: 'assist' | 'rdp'
+  connection: string | null
   require_consent: boolean
   max_minutes: number
   status: SessionStatus

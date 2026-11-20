@@ -216,11 +216,79 @@ def close_quick_assist(_: dict) -> Outcome:
     return Outcome("succeeded", "Quick Assist closed")
 
 
+# ------------------------------------------------------------------------------------------- remote desktop (RDP)
+def _lan_ip() -> str:
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))  # no packet is sent; just picks the outbound interface
+        return s.getsockname()[0]
+    except OSError:
+        return socket.gethostbyname(socket.gethostname())
+    finally:
+        s.close()
+
+
+def _rdp_listener_up(timeout: float = 8.0) -> bool:
+    """True once something is listening on 127.0.0.1:3389. On Pro/Enterprise the listener starts within a couple of
+    seconds of enabling RDP; on Windows Home there is no RDP host, so it never comes up."""
+    import socket
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex(("127.0.0.1", 3389)) == 0:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _windows_edition_hint() -> str:
+    try:
+        import platform
+        ed = (platform.win32_edition() or "")
+    except Exception:  # noqa: BLE001
+        ed = ""
+    # Home editions report "Core" / "CoreSingleLanguage" / "CoreN"; they cannot host Remote Desktop.
+    return " (this endpoint runs a Windows Home edition, which cannot host Remote Desktop)" \
+        if ed.lower().startswith("core") else ""
+
+
+def rdp_enable(_: dict) -> Outcome:
+    """Broker-only: turn on native Windows Remote Desktop and open the firewall for the session. The agent only calls
+    this once it is already showing the mandatory on-screen banner, so RDP is never enabled silently."""
+    subprocess.run([exe("reg.exe"), "add", r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
+                    "/v", "fDenyTSConnections", "/t", "REG_DWORD", "/d", "0", "/f"],
+                   capture_output=True, creationflags=NO_WINDOW, check=True)
+    subprocess.run([exe("netsh.exe"), "advfirewall", "firewall", "set", "rule", "group=remote desktop",
+                    "new", "enable=Yes"], capture_output=True, creationflags=NO_WINDOW)
+    # Verify a Remote Desktop host actually came up. On Windows Home it never will, so fail with a clear,
+    # actionable message instead of letting the operator's mstsc hit a cryptic "can't connect" dialog later.
+    if not _rdp_listener_up():
+        rdp_disable(_)  # revert the registry/firewall changes we just made — the session did not start
+        return Outcome("failed",
+                       "Remote Desktop could not be enabled on this endpoint" + _windows_edition_hint() +
+                       ". Use Remote Assistance instead.",
+                       {"rdp_enabled": False}, {"rdp_enabled": False})
+    return Outcome("succeeded", "Remote Desktop enabled for this session", {"rdp_enabled": False},
+                   {"rdp_enabled": True, "connection": f"{_lan_ip()}:3389"})
+
+
+def rdp_disable(_: dict) -> Outcome:
+    """Broker-only: turn Remote Desktop back off and close the firewall at the end of the session."""
+    subprocess.run([exe("reg.exe"), "add", r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
+                    "/v", "fDenyTSConnections", "/t", "REG_DWORD", "/d", "1", "/f"],
+                   capture_output=True, creationflags=NO_WINDOW, check=True)
+    subprocess.run([exe("netsh.exe"), "advfirewall", "firewall", "set", "rule", "group=remote desktop",
+                    "new", "enable=No"], capture_output=True, creationflags=NO_WINDOW)
+    return Outcome("succeeded", "Remote Desktop disabled", {"rdp_enabled": True}, {"rdp_enabled": False})
+
+
 HANDLERS = {
     "device.inspect": inspect, "device.lock": lock, "device.restart": restart, "device.restart_cancel": restart_cancel,
     "device.shutdown": shutdown, "device.logoff": logoff,
     "account.disable": account_disable, "account.enable": account_enable, "account.remove_admin": account_remove_admin,
-    "assist.end": close_quick_assist,
+    "assist.end": close_quick_assist, "rdp.start": rdp_enable, "rdp.end": rdp_disable,
 }
 
 # On Linux the POSIX implementations replace the whole handler set (see remote/linux_actions.py).

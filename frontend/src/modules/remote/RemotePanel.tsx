@@ -1,11 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Headset, Lock, Power, PowerOff, ShieldOff, UserCheck, UserX } from 'lucide-react'
+import { Activity, Headset, Lock, Monitor, Power, PowerOff, ShieldOff, UserCheck, UserX } from 'lucide-react'
 import { Alert, Badge, Button, Card, CardHeader, Field, Input, Spinner } from '@/components/ui/primitives'
 import { Dialog } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
-import { describePasskeyError, stepUp } from '@/services/passkeys'
 import type { Device, InspectState, RemoteAction, RemoteCommand, RemoteSession } from '@/types/api'
 import { formatDateTime, relativeTime } from '@/utils/format'
 import { SessionStatusBadge, TerminateButton } from './shared'
@@ -39,18 +38,21 @@ export function RemotePanel({ device }: { device: Device }) {
   const remote = can('devices:remote')
   const [pending, setPending] = useState<Pending | null>(null)
   const [reason, setReason] = useState('')
+  const [stepPw, setStepPw] = useState('')
   const [delay, setDelay] = useState(300)
   const [assistOpen, setAssistOpen] = useState(false)
+  const [rdpOpen, setRdpOpen] = useState(false)
   const [assistMinutes, setAssistMinutes] = useState(30)
+  const [rdpConnectMsg, setRdpConnectMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
 
   const actions = useQuery({ queryKey: ['device', device.id, 'actions'], queryFn: () => api.get<RemoteAction[]>(`/devices/${device.id}/actions`), refetchInterval: 5_000 })
   const sessions = useQuery({ queryKey: ['device', device.id, 'sessions'], queryFn: () => api.get<RemoteSession[]>(`/remote-sessions?device_id=${device.id}&limit=10`), refetchInterval: 5_000 })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['device', device.id] }) }
-  const reset = () => { setPending(null); setReason(''); setAssistOpen(false) }
+  const reset = () => { setPending(null); setReason(''); setStepPw(''); setAssistOpen(false); setRdpOpen(false) }
 
   const act = useMutation({
     mutationFn: async (p: Pending) => {
-      const step_up = SENSITIVE.has(p.command) ? await stepUp() : undefined  // fresh passkey confirmation
+      const step_up = SENSITIVE.has(p.command) ? { password: stepPw } : undefined  // password confirmation
       return api.post<RemoteAction>(`/devices/${device.id}/actions`, {
         command: p.command, parameters: WITH_DELAY.has(p.command) ? { ...p.parameters, delay_seconds: delay } : p.parameters,
         reason, ...(step_up ? { step_up } : {}),
@@ -59,11 +61,24 @@ export function RemotePanel({ device }: { device: Device }) {
     onSuccess: () => { refresh(); reset() },
   })
   const assist = useMutation({
-    mutationFn: async () => {
-      const step_up = await stepUp()
-      return api.post<RemoteSession>(`/devices/${device.id}/assist`, { reason, max_minutes: assistMinutes, step_up })
-    },
+    mutationFn: async () =>
+      api.post<RemoteSession>(`/devices/${device.id}/assist`, { reason, max_minutes: assistMinutes, step_up: { password: stepPw } }),
     onSuccess: () => { refresh(); reset() },
+  })
+  const rdp = useMutation({
+    // Unattended RDP: no password step-up (by design). The endpoint always shows a visible banner for the session.
+    mutationFn: async () => api.post<RemoteSession>(`/devices/${device.id}/rdp`, { reason, max_minutes: assistMinutes }),
+    onSuccess: () => { refresh(); reset() },
+  })
+  const rdpConnect = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const bridge = (window as unknown as { cageRdp?: { connect: (i: unknown) => Promise<unknown> } }).cageRdp
+      if (!bridge?.connect) throw new Error('Remote Desktop connect runs in the installed desktop app. Open this console in the Antiquarian’s Cage desktop app.')
+      const t = await api.post<{ operator_token: string; tunnel_path: string }>(`/remote-sessions/${sessionId}/rdp-connect`)
+      await bridge.connect({ sessionId, token: t.operator_token, tunnelPath: t.tunnel_path })
+    },
+    onSuccess: () => setRdpConnectMsg({ tone: 'success', text: 'Opening Remote Desktop… the connection is tunnelled through the server.' }),
+    onError: (e) => setRdpConnectMsg({ tone: 'danger', text: describeError(e) }),
   })
 
   const latestInspect = actions.data?.find((a) => a.command === 'device.inspect' && a.status === 'succeeded')
@@ -82,12 +97,19 @@ export function RemotePanel({ device }: { device: Device }) {
       {open && (
         <Alert tone={open.status === 'active' ? 'warning' : 'info'}>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span><Headset className="mr-1.5 inline size-4" />Remote assistance <b>{open.status.replace('_', ' ')}</b> — {open.requested_by_label}
+            <span>{open.mode === 'rdp' ? <Monitor className="mr-1.5 inline size-4" /> : <Headset className="mr-1.5 inline size-4" />}
+              {open.mode === 'rdp' ? 'Remote desktop' : 'Remote assistance'} <b>{open.status.replace('_', ' ')}</b> — {open.requested_by_label}
               {open.expires_at && ` · ends ${formatDateTime(open.expires_at)}`}{open.status === 'requested' && ' · waiting for the endpoint'}</span>
-            {remote && <TerminateButton session={open} onDone={refresh} />}
+            <div className="flex items-center gap-2">
+              {open.mode === 'rdp' && open.status === 'active' && remote && (
+                <Button size="sm" variant="primary" loading={rdpConnect.isPending} onClick={() => { setRdpConnectMsg(null); rdpConnect.mutate(open.id) }}><Monitor />Connect</Button>
+              )}
+              {remote && <TerminateButton session={open} onDone={refresh} />}
+            </div>
           </div>
         </Alert>
       )}
+      {rdpConnectMsg && <Alert tone={rdpConnectMsg.tone}>{rdpConnectMsg.text}</Alert>}
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         <Card>
           <CardHeader title="Remote administration" description="Allowlisted, signed, short-lived commands. Every action needs a reason and is audited." />
@@ -100,6 +122,7 @@ export function RemotePanel({ device }: { device: Device }) {
               <Button size="sm" variant="outline" onClick={() => ask('device.shutdown', { message: 'Your IT administrator scheduled a shutdown. Save your work.' }, 'Power off the endpoint', 'Schedules a power-off with an on-screen warning. Unsaved work in open applications may be lost; the device goes offline.', true)}><PowerOff />Power off</Button>
               <Button size="sm" variant="outline" onClick={() => ask('device.logoff', {}, 'Log off the user', 'Ends the active interactive session, returning to the sign-in screen. Unsaved work in open applications may be lost.', true)}><UserX />Log off user</Button>
               <Button size="sm" onClick={() => { assist.reset(); setAssistOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Headset />Remote assistance</Button>
+              <Button size="sm" onClick={() => { rdp.reset(); setRdpOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Monitor />Remote desktop</Button>
             </div>
           )}
           <div className="border-t border-ink-700 px-4 py-3">
@@ -171,7 +194,7 @@ export function RemotePanel({ device }: { device: Device }) {
           )}
         </Card>
         <Card>
-          <CardHeader title="Remote assistance sessions" />
+          <CardHeader title="Remote sessions" description="Remote assistance (Quick Assist) and remote desktop (RDP)." />
           {!sessions.data?.length ? <p className="px-4 py-3 text-sm text-silver-500">No sessions.</p> : (
             <ul className="max-h-80 divide-y divide-ink-800 overflow-y-auto">{sessions.data.map((x) => (
               <li key={x.id} className="px-4 py-2">
@@ -187,16 +210,16 @@ export function RemotePanel({ device }: { device: Device }) {
       <Dialog open={!!pending} onOpenChange={(o) => !o && reset()} title={pending?.title ?? ''} description={pending?.description}>
         {pending && (
           <form onSubmit={(e: FormEvent) => { e.preventDefault(); act.mutate(pending) }} className="space-y-3">
-            {act.error && <Alert>{describePasskeyError(act.error) ?? describeError(act.error)}</Alert>}
+            {act.error && <Alert>{describeError(act.error)}</Alert>}
             {WITH_DELAY.has(pending.command) && (
               <Field label="Warning delay before restart (seconds)" htmlFor="rd"><Input id="rd" type="number" min={60} max={3600} value={delay} onChange={(e) => setDelay(Number(e.target.value))} /></Field>
             )}
             <Field label="Reason (shown in the audit log)" htmlFor="rr"><Input id="rr" required minLength={3} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
             {SENSITIVE.has(pending.command) && (
-              <p className="text-xs text-silver-500">When you send, you'll confirm with your <span className="text-silver-300">passkey</span> (Windows Hello, your phone or a security key).</p>
+              <Field label="Confirm with your password" htmlFor="rp"><Input id="rp" type="password" required autoComplete="current-password" value={stepPw} onChange={(e) => setStepPw(e.target.value)} /></Field>
             )}
             <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={reset}>Cancel</Button>
-              <Button type="submit" variant={pending.danger ? 'danger' : 'primary'} loading={act.isPending}>Confirm with passkey &amp; send</Button></div>
+              <Button type="submit" variant={pending.danger ? 'danger' : 'primary'} loading={act.isPending}>Confirm &amp; send</Button></div>
           </form>
         )}
       </Dialog>
@@ -204,11 +227,21 @@ export function RemotePanel({ device }: { device: Device }) {
       <Dialog open={assistOpen} onOpenChange={(o) => !o && reset()} title="Request remote assistance"
         description="The person at the endpoint is asked to allow the session (unless your organisation disabled consent). A red banner stays on their screen for the whole session and they can end it at any time. Screen sharing uses Windows Quick Assist, opened only after consent.">
         <form onSubmit={(e: FormEvent) => { e.preventDefault(); assist.mutate() }} className="space-y-3">
-          {assist.error && <Alert>{describePasskeyError(assist.error) ?? describeError(assist.error)}</Alert>}
+          {assist.error && <Alert>{describeError(assist.error)}</Alert>}
           <Field label="Reason (shown to the user)" htmlFor="ar"><Input id="ar" required minLength={5} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
           <Field label="Maximum duration (minutes)" htmlFor="am"><Input id="am" type="number" min={5} max={120} value={assistMinutes} onChange={(e) => setAssistMinutes(Number(e.target.value))} /></Field>
-          <p className="text-xs text-silver-500">When you send, you'll confirm with your <span className="text-silver-300">passkey</span>.</p>
+          <Field label="Confirm with your password" htmlFor="ap"><Input id="ap" type="password" required autoComplete="current-password" value={stepPw} onChange={(e) => setStepPw(e.target.value)} /></Field>
           <div className="flex justify-end"><Button type="submit" loading={assist.isPending}><Headset />Confirm &amp; send request</Button></div>
+        </form>
+      </Dialog>
+
+      <Dialog open={rdpOpen} onOpenChange={(o) => !o && reset()} title="Start remote desktop (RDP)"
+        description="Starts an unattended Remote Desktop session: no password and no consent prompt on the endpoint. A visible 'Remote desktop active' banner is shown on the endpoint for the whole session, which the person there can end at any time. Once active, connect with your own RDP client to the address shown above.">
+        <form onSubmit={(e: FormEvent) => { e.preventDefault(); rdp.mutate() }} className="space-y-3">
+          {rdp.error && <Alert>{describeError(rdp.error)}</Alert>}
+          <Field label="Reason (audited)" htmlFor="rr2"><Input id="rr2" required minLength={5} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+          <Field label="Maximum duration (minutes)" htmlFor="rm"><Input id="rm" type="number" min={5} max={120} value={assistMinutes} onChange={(e) => setAssistMinutes(Number(e.target.value))} /></Field>
+          <div className="flex justify-end"><Button type="submit" loading={rdp.isPending}><Monitor />Start remote desktop</Button></div>
         </form>
       </Dialog>
     </div>

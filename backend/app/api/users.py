@@ -10,11 +10,17 @@ from sqlalchemy.orm import Session
 from app.api.deps import AuthContext, require_permission
 from app.core.database import get_db, utcnow
 from app.models import Role, User, UserRole
-from app.schemas.admin import AdminUserOut, InviteAdminRequest, RoleDetail, SetRolesRequest
+from app.schemas.admin import (
+    AdminCreatedOut,
+    AdminUserOut,
+    CreateAdminRequest,
+    HandoverOut,
+    RoleDetail,
+    SetRolesRequest,
+)
 from app.schemas.common import Message
 from app.security.permissions import PRIVILEGED_ROLE
-from app.services import audit, auth, email, notifications, rbac, tenancy
-from app.services.email import EmailDeliveryError
+from app.services import audit, auth, notifications, rbac, tenancy
 
 router = APIRouter(prefix="/users", tags=["administrators"])
 
@@ -48,9 +54,11 @@ def list_roles(ctx: AuthContext = Depends(require_permission("users:read")), db:
                        permissions=sorted(p.key for p in r.permissions)) for r in roles]
 
 
-@router.post("", response_model=AdminUserOut, status_code=201)
-def invite_admin(body: InviteAdminRequest, ctx: AuthContext = Depends(require_permission("users:manage")),
+@router.post("", response_model=AdminCreatedOut, status_code=201)
+def create_admin(body: CreateAdminRequest, ctx: AuthContext = Depends(require_permission("users:manage")),
                  db: Session = Depends(get_db)):
+    """Create an administrator account with a temporary password. The Super Admin hands the returned password over to
+    the admin, who must change it on first sign-in. The password is shown ONCE and never stored in clear."""
     org_id = ctx.user.organization_id
     if auth.find_user_by_email(db, org_id, str(body.email)):
         raise HTTPException(409, "An account with this email already exists")
@@ -61,60 +69,34 @@ def invite_admin(body: InviteAdminRequest, ctx: AuthContext = Depends(require_pe
     if not tenancy.is_global(ctx) and body.role in ("super_admin", "admin"):
         raise HTTPException(403, "Only a Super Admin can create administrator accounts")
     user = User(organization_id=org_id, owner_admin_id=tenancy.owner_for(ctx), email=str(body.email).lower(),
-                full_name=body.full_name, status="pending")
+                full_name=body.full_name, status="active")
     db.add(user)
     db.flush()
     db.add(UserRole(user_id=user.id, role_id=role.id, granted_by=ctx.user.id))
-    raw = auth.issue_invite(db, user)
-    audit.record(db, org_id, ctx.actor, "user.invited", target_type="user", target_id=user.id,
+    temp = auth.set_temporary_password(db, user)
+    audit.record(db, org_id, ctx.actor, "user.created", target_type="user", target_id=user.id,
                  target_label=user.email, metadata={"role": body.role})
     db.commit()
     db.refresh(user)
-    try:
-        email.send_email(user.email, "You have been invited",
-                         f"Hello {user.full_name},\n\n{ctx.user.full_name} invited you to administer "
-                         f"Antiquarian's Cage as {role.name}.\n\nSet your password:\n{email.link('/accept-invite', raw)}")
-    except EmailDeliveryError:
-        raise HTTPException(502, "Administrator created, but the invitation email could not be sent. Resend it later.")
-    return user
+    return AdminCreatedOut(user=AdminUserOut.model_validate(user), temporary_password=temp)
 
 
-@router.post("/{user_id}/resend-invite", response_model=Message)
-def resend_invite(user_id: uuid.UUID, ctx: AuthContext = Depends(require_permission("users:manage")),
-                  db: Session = Depends(get_db)):
+@router.post("/{user_id}/reset-password", response_model=HandoverOut)
+def reset_password(user_id: uuid.UUID, ctx: AuthContext = Depends(require_permission("users:manage")),
+                   db: Session = Depends(get_db)):
+    """Regenerate a temporary password for an admin and require a change on next sign-in — the handover step (give
+    the returned password to the admin). Any active sessions for that account are signed out."""
     user = _get(db, ctx, user_id)
-    if user.status != "pending":
-        raise HTTPException(409, "This administrator has already accepted their invitation")
-    raw = auth.issue_invite(db, user)
-    audit.record(db, user.organization_id, ctx.actor, "user.invite_resent", target_type="user", target_id=user.id,
-                 target_label=user.email)
-    db.commit()
-    try:
-        email.send_email(user.email, "Your invitation", f"Set your password:\n{email.link('/accept-invite', raw)}")
-    except EmailDeliveryError:
-        raise HTTPException(502, "The invitation email could not be sent")
-    return Message(detail="Invitation resent")
-
-
-@router.post("/{user_id}/recovery", response_model=Message)
-def issue_passkey_recovery(user_id: uuid.UUID, ctx: AuthContext = Depends(require_permission("users:manage")),
-                           db: Session = Depends(get_db)):
-    """Admin-issued passkey recovery (replaces password reset): a single-use link that lets the user register a fresh
-    passkey. Any existing passkeys are revoked when the new one is enrolled."""
-    user = _get(db, ctx, user_id)
+    if user.id == ctx.user.id:
+        raise HTTPException(409, "Use Change password for your own account")
     if user.status == "disabled":
-        raise HTTPException(409, "Re-enable the account before issuing recovery")
-    raw = auth.issue_recovery(db, user)
-    audit.record(db, user.organization_id, ctx.actor, "user.recovery_issued", target_type="user", target_id=user.id,
-                 target_label=user.email)
+        raise HTTPException(409, "Re-enable the account before resetting its password")
+    temp = auth.set_temporary_password(db, user)
+    n = auth.revoke_user_sessions(db, user.id, "password_reset")
+    audit.record(db, user.organization_id, ctx.actor, "user.password_reset", target_type="user", target_id=user.id,
+                 target_label=user.email, metadata={"sessions_revoked": n})
     db.commit()
-    try:
-        email.send_email(user.email, "Recover access to Antiquarian's Cage",
-                         f"Hello {user.full_name},\n\n{ctx.user.full_name} issued a recovery link so you can register "
-                         f"a new passkey. It is valid for 1 hour and can be used once:\n{email.link('/recover', raw)}")
-    except EmailDeliveryError:
-        raise HTTPException(502, "Recovery link created, but the email could not be sent. Resend it later.")
-    return Message(detail="Recovery link sent")
+    return HandoverOut(user_id=user.id, email=user.email, temporary_password=temp)
 
 
 @router.put("/{user_id}/roles", response_model=AdminUserOut)

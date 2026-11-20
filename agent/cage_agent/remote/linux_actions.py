@@ -253,9 +253,80 @@ def close_quick_assist(_: dict) -> Outcome:
     return Outcome("succeeded", "No remote-assistance helper to close on Linux")
 
 
+# ------------------------------------------------------------------------------------------------- remote desktop
+def _lan_ip() -> str:
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))  # no packet is sent; just picks the outbound interface
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def _rdp_listener_up(timeout: float = 12.0) -> bool:
+    """True once xrdp is listening on 127.0.0.1:3389 (it can take a few seconds to come up after enable)."""
+    import socket
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex(("127.0.0.1", 3389)) == 0:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _firewall_3389(opening: bool) -> None:
+    """Best-effort open/close of TCP 3389 across ufw and firewalld. Silent if neither (or an inactive) firewall."""
+    try:
+        if shutil.which("ufw"):
+            _run(["ufw", "allow", "3389/tcp"] if opening else ["ufw", "delete", "allow", "3389/tcp"], timeout=15)
+        elif shutil.which("firewall-cmd"):
+            _run(["firewall-cmd", "--add-port=3389/tcp" if opening else "--remove-port=3389/tcp"], timeout=15)
+    except Exception:  # noqa: BLE001 - firewall is best-effort; xrdp + the relay still work without it
+        pass
+
+
+def rdp_enable(_: dict) -> Outcome:
+    """Enable the Linux Remote Desktop host (xrdp) and open the firewall for the session. Requires root (the Linux
+    broker-equivalent). The agent only calls this once the mandatory on-screen banner is already showing."""
+    if not shutil.which("xrdp"):
+        return Outcome("needs_attention",
+                       "xrdp is not installed on this endpoint. Install it (e.g. 'sudo apt install xrdp') to allow "
+                       "Remote Desktop, or use Remote Assistance instead.",
+                       {"rdp_enabled": False}, {"rdp_enabled": False})
+    try:
+        _run(["systemctl", "enable", "--now", "xrdp"], timeout=40)
+    except ElevationRequired:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        return Outcome("failed", f"Could not start xrdp: {str(exc)[:200]}", {"rdp_enabled": False},
+                       {"rdp_enabled": False})
+    _firewall_3389(True)
+    if not _rdp_listener_up():
+        return Outcome("failed", "xrdp did not start listening on port 3389 on this endpoint. Check 'systemctl status "
+                       "xrdp' / that a desktop environment is installed.", {"rdp_enabled": False},
+                       {"rdp_enabled": False})
+    return Outcome("succeeded", "Remote Desktop (xrdp) enabled for this session", {"rdp_enabled": False},
+                   {"rdp_enabled": True, "connection": f"{_lan_ip()}:3389"})
+
+
+def rdp_disable(_: dict) -> Outcome:
+    """Turn the Linux RDP host (xrdp) back off and close the firewall at the end of the session."""
+    _firewall_3389(False)
+    try:
+        _run(["systemctl", "disable", "--now", "xrdp"], timeout=40)
+    except Exception:  # noqa: BLE001 - make end-of-session teardown best-effort
+        pass
+    return Outcome("succeeded", "Remote Desktop (xrdp) disabled", {"rdp_enabled": True}, {"rdp_enabled": False})
+
+
 HANDLERS = {
     "device.inspect": inspect, "device.lock": lock, "device.restart": restart, "device.restart_cancel": restart_cancel,
     "device.shutdown": shutdown, "device.logoff": logoff,
     "account.disable": account_disable, "account.enable": account_enable, "account.remove_admin": account_remove_admin,
-    "assist.end": close_quick_assist,
+    "assist.end": close_quick_assist, "rdp.start": rdp_enable, "rdp.end": rdp_disable,
 }

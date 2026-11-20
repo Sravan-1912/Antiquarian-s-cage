@@ -1,3 +1,10 @@
-// No privileged bridge is exposed: the console is a plain web app served from the local
-// backend and needs nothing from Node. Kept as an explicit, empty, context-isolated preload
-// so the renderer stays sandboxed (contextIsolation on, nodeIntegration off).
+// Minimal, context-isolated bridge. The renderer stays sandboxed (contextIsolation on, nodeIntegration off); the
+// only privileged capability exposed is starting a local RDP tunnel to the backend relay, which the console calls
+// after it has authenticated and minted a one-time operator token.
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("cageRdp", {
+  available: true,
+  // info: { sessionId, token, tunnelPath } → opens a local tunnel + launches mstsc; resolves to { port }.
+  connect: (info) => ipcRenderer.invoke("cage-rdp-connect", info),
+});

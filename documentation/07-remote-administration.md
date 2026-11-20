@@ -36,6 +36,49 @@ three times (server, agent, broker). There is no arbitrary command or script exe
 What is deliberately **not** implemented: hidden screen capture, keylogging, microphone access, silent sessions,
 or any custom remote-control protocol.
 
+## Remote desktop (RDP)
+
+For full remote control, a Super Admin or assigned Admin can start an **unattended Remote Desktop** session from the
+endpoint's page (**Remote desktop**). Unlike remote assistance it needs **no consent prompt and no password step-up** —
+but it is *not* silent:
+
+1. The console issues a signed `rdp.start` job (allowlisted, short-lived) carrying a one-time relay token. RBAC
+   (`devices:remote`) and admin isolation still apply; the request is audited and notifies endpoint managers.
+2. On the endpoint the agent **shows the mandatory banner first** ("● REMOTE DESKTOP ACTIVE", always-on-top, cannot be
+   minimised, with an *End session* button). Only once the banner is on screen does the privileged broker enable native
+   Windows Remote Desktop (`fDenyTSConnections=0`) and open the firewall. **If the banner cannot be shown, RDP is never
+   enabled** — the session fails closed. There is no silent mode.
+3. The agent then opens an **outbound WebSocket tunnel to the backend** (`/agent/v1/rdp/tunnel`) and bridges it to its
+   local `127.0.0.1:3389`.
+4. In the console, **Connect** mints a one-time operator token (`/remote-sessions/{id}/rdp-connect`) and the desktop app
+   opens a matching outbound tunnel (`/api/v1/rdp/tunnel`), exposes a local port, and launches `mstsc` at it.
+5. The backend **relay** copies bytes between the two tunnels (it never interprets RDP). Because **both ends dial out**,
+   this works across any network — home Wi-Fi, mobile, another office — with **no VPN and no inbound firewall rule** on
+   either side.
+6. The session ends when: the person at the endpoint clicks *End session*; the operator ends it in the console (signed
+   `rdp.end`); the timer/expiry is reached; or the agent stops. Every path closes the banner + both tunnels, has the
+   broker **disable Remote Desktop and close the firewall again**, and is audited.
+
+### Cross-network requirements
+
+* The endpoints and the operator must reach the **same backend**. For devices on different networks that means a
+  **publicly reachable (cloud) backend** (see `13-cloud-deployment.md`) — the agents dial out to it for heartbeats and
+  for the RDP tunnel. The desktop app's default **loopback** backend is for a single local machine only.
+* The admin uses the **installed desktop app** to connect (it provides the local tunnel + `mstsc`). Point it at the
+  shared backend with `CAGE_REMOTE_BACKEND_URL=https://your-backend` instead of its bundled local one. A plain browser
+  cannot open the local tunnel, so **Connect** there explains that the desktop app is required.
+* The relay pairs the two tunnels **in one process**, so run a single backend instance (or sticky-route the two
+  `/rdp/tunnel` paths of a session to the same instance).
+
+### RDP limitations (not yet verified on real hardware)
+
+* **Windows endpoints only** in this version; a Linux target returns "needs attention". The full path (enable → banner →
+  tunnel → relay → `mstsc` → disable) has **not been verified on real machines across two networks** and must be tested
+  on isolated VMs before relying on it — enabling RDP and editing the firewall are privileged, security-sensitive.
+* Same session-0 caveat as assistance: if the agent cannot show the banner in the user's session, no RDP session starts.
+* Between the banner closing and the server-issued `rdp.end`, there is a brief window before RDP is disabled (seconds),
+  the same round-trip the assistance cleanup uses.
+
 ## Limitations
 
 * When the agent runs as a Windows service (session 0) it cannot show the consent prompt or banner; launching the

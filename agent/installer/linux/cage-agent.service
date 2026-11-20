@@ -10,7 +10,7 @@ Type=simple
 # restart, account changes). The device private key is stored 0600 in StateDirectory and machine-id-wrapped.
 User=root
 ExecStart=/opt/cage-agent/cage-agent run --data-dir /var/lib/cage-agent
-Restart=on-failure
+Restart=always
 RestartSec=10
 StateDirectory=cage-agent
 StateDirectoryMode=0700

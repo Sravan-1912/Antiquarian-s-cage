@@ -13,6 +13,7 @@ ROUTE = {
     "device.shutdown": "broker", "device.logoff": "broker",
     "account.disable": "broker", "account.enable": "broker", "account.remove_admin": "broker",
     "assist.start": "agent", "assist.end": "agent",
+    "rdp.start": "agent", "rdp.end": "agent",
 }
 ALLOWED_COMMANDS = set(ROUTE)
 COMMON = {"reason", "requested_by"}
@@ -61,6 +62,16 @@ def validate_command_params(command: str, p) -> dict:
         if not isinstance(t, int) or not 30 <= t <= 300:
             raise ValueError("consent_timeout_seconds must be 30..300")
     elif command == "assist.end":
+        _keys(p, {"session_id"})
+        uuid.UUID(_str(p, "session_id", 36))
+    elif command == "rdp.start":
+        _keys(p, {"session_id", "max_minutes", "tunnel_token"})
+        uuid.UUID(_str(p, "session_id", 36))
+        m = p.get("max_minutes")
+        if not isinstance(m, int) or not 5 <= m <= 120:
+            raise ValueError("max_minutes must be 5..120")
+        _str(p, "tunnel_token", 256)
+    elif command == "rdp.end":
         _keys(p, {"session_id"})
         uuid.UUID(_str(p, "session_id", 36))
     else:

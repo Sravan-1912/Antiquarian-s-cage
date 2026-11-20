@@ -21,6 +21,11 @@ class RemoteSession(UUIDPk, Base):
     requested_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     requested_by_label: Mapped[str] = mapped_column(String(320))
     reason: Mapped[str] = mapped_column(Text)
+    # assist = consented screen sharing (Quick Assist). rdp = unattended native Remote Desktop with a mandatory
+    # on-screen banner on the endpoint (the agent fails closed if the banner cannot be shown).
+    mode: Mapped[str] = mapped_column(String(16), default="assist")
+    # For rdp: the host:port the administrator connects their RDP client to (reported by the endpoint).
+    connection: Mapped[str | None] = mapped_column(String(128))
     require_consent: Mapped[bool] = mapped_column(Boolean, default=True)
     max_minutes: Mapped[int] = mapped_column(Integer)
     # requested | awaiting_consent | active | ending | ended | denied | expired | cancelled | failed

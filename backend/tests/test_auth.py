@@ -1,35 +1,56 @@
-"""Passkey-only authentication: passwordless bootstrap, passkey sign-in, cookie/CSRF hardening and sessions."""
+"""Password authentication: bootstrap, sign-in, lockout, cookie/CSRF hardening and sessions."""
 from sqlalchemy import select
 
-from tests.conftest import bootstrap_admin, csrf, enrol_passkey, login
+from tests.conftest import ROOT_PW, bootstrap_admin, csrf, login
 
 
-def test_passwordless_bootstrap_and_passkey_signin(client, outbox):
+def test_password_bootstrap_and_signin(client, outbox):
     assert client.get("/api/v1/auth/bootstrap-status").json() == {"needs_setup": True}
     r = client.post("/api/v1/auth/register", json={
-        "organization_name": "Acme", "full_name": "Ada Root", "email": "root@example.com"})
-    assert r.status_code == 201
-    token = r.json()["enroll_token"]
+        "organization_name": "Acme", "full_name": "Ada Root", "email": "root@example.com", "password": ROOT_PW})
+    assert r.status_code == 201, r.text
 
     # Registration is closed once the first administrator exists.
     assert client.post("/api/v1/auth/register", json={
-        "organization_name": "Evil", "full_name": "Mallory X", "email": "m@example.org"}).status_code == 403
+        "organization_name": "Evil", "full_name": "Mallory X", "email": "m@example.org",
+        "password": ROOT_PW}).status_code == 403
     assert client.get("/api/v1/auth/bootstrap-status").json() == {"needs_setup": False}
-    assert client.get("/api/v1/auth/me").status_code == 401  # not signed in until the passkey is registered
 
-    enrol_passkey(client, token, "root@example.com", "Root device")  # registers the passkey and signs in
+    # register signs the Super Admin in.
     me = client.get("/api/v1/auth/me").json()
     assert me["email"] == "root@example.com"
-    assert [r["key"] for r in me["roles"]] == ["super_admin"] and "users:manage" in me["permissions"]
-    assert "mfa_enabled" not in me  # no MFA field in the passkey-only model
+    assert [x["key"] for x in me["roles"]] == ["super_admin"] and "users:manage" in me["permissions"]
+    assert me["must_change_password"] is False
+
+
+def test_weak_password_rejected_on_bootstrap(client, outbox):
+    r = client.post("/api/v1/auth/register", json={
+        "organization_name": "Acme", "full_name": "Ada Root", "email": "root@example.com", "password": "short"})
+    assert r.status_code == 422
+
+
+def test_login_wrong_then_right(client, outbox):
+    bootstrap_admin(client, outbox)
+    client.post("/api/v1/auth/logout", headers=csrf(client))
+    assert client.post("/api/v1/auth/login",
+                       json={"email": "root@example.com", "password": "wrong-password"}).status_code == 401
+    assert login(client, "root@example.com")["must_change_password"] is False
+
+
+def test_lockout_after_repeated_failures(client, outbox):
+    bootstrap_admin(client, outbox)
+    client.post("/api/v1/auth/logout", headers=csrf(client))
+    codes = [client.post("/api/v1/auth/login",
+                         json={"email": "root@example.com", "password": "nope"}).status_code for _ in range(6)]
+    assert 423 in codes  # account temporarily locked after the max failed attempts
+    # even the correct password is refused while locked
+    assert client.post("/api/v1/auth/login",
+                       json={"email": "root@example.com", "password": ROOT_PW}).status_code == 423
 
 
 def test_cookies_are_hardened_and_csrf_enforced(client, outbox):
-    bootstrap_admin(client, outbox)  # signs in with a passkey
-    authn = client._cage_authn["root@example.com"]
-    o = client.post("/api/v1/auth/passkeys/login/options").json()
-    r = client.post("/api/v1/auth/passkeys/login/verify",
-                    json={"challenge_id": o["challenge_id"], "credential": authn.get(o["options"])})
+    bootstrap_admin(client, outbox)
+    r = client.post("/api/v1/auth/login", json={"email": "root@example.com", "password": ROOT_PW})
     set_cookie = ";".join(r.headers.get_list("set-cookie")).lower()
     assert "cage_session=" in set_cookie and "httponly" in set_cookie and "samesite=strict" in set_cookie
 
@@ -39,20 +60,11 @@ def test_cookies_are_hardened_and_csrf_enforced(client, outbox):
     assert client.get("/api/v1/auth/me").status_code == 401
 
 
-def test_foreign_origin_rejected(client, outbox):
+def test_login_rate_limited(client, outbox):
     bootstrap_admin(client, outbox)
-    authn = client._cage_authn["root@example.com"]
-    o = client.post("/api/v1/auth/passkeys/login/options").json()
-    r = client.post("/api/v1/auth/passkeys/login/verify",
-                    json={"challenge_id": o["challenge_id"], "credential": authn.get(o["options"])},
-                    headers={"Origin": "https://evil.example"})
-    assert r.status_code == 403
-
-
-def test_passkey_login_rate_limited(client, outbox):
-    bootstrap_admin(client, outbox)
-    codes = [client.post("/api/v1/auth/passkeys/login/options").status_code for _ in range(24)]
-    assert 429 in codes  # the passkey options endpoint is rate limited
+    codes = [client.post("/api/v1/auth/login",
+                         json={"email": "root@example.com", "password": "x"}).status_code for _ in range(14)]
+    assert 429 in codes  # the login endpoint is rate limited
 
 
 def test_sessions_and_login_history(client, outbox):

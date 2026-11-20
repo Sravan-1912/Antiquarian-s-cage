@@ -26,25 +26,25 @@ def _sweep():
         return n
 
 
-def _fail_passkey_login(client, authn):
-    """A failed passkey sign-in that still resolves the account (UV flag off -> verification fails)."""
-    o = client.post("/api/v1/auth/passkeys/login/options").json()
-    return client.post("/api/v1/auth/passkeys/login/verify",
-                       json={"challenge_id": o["challenge_id"], "credential": authn.get(o["options"], uv=False)})
+def _fail_login(client, email="root@example.com"):
+    """A failed password sign-in for a known account."""
+    return client.post("/api/v1/auth/login", json={"email": email, "password": "wrong-password"})
 
 
 def test_failed_signins_raise_suspicious_alert_and_notify(client, outbox):
-    bootstrap_admin(client, outbox)
-    authn = client._cage_authn["root@example.com"]
-    client.post("/api/v1/auth/logout", headers=csrf(client))
+    bootstrap_admin(client, outbox)  # root stays signed in on its bootstrap session
+    uid = client.get("/api/v1/auth/me").json()["id"]
     for _ in range(5):
-        assert _fail_passkey_login(client, authn).status_code == 401
+        assert _fail_login(client).status_code in (401, 423)
+    rules = {a["rule_key"]: a for a in _alerts(client)}
+    assert rules["auth_failed_burst"]["kind"] == "suspicious_activity"
+    assert "attack" not in rules["auth_failed_burst"]["title"].lower()
+    # The repeated failures lock the account; unlock it (from the live session) and sign in cleanly.
+    assert client.post(f"/api/v1/users/{uid}/unlock", headers=csrf(client)).status_code == 200
     from app.core.rate_limit import get_rate_limiter
     get_rate_limiter().reset()
     login(client, "root@example.com")  # a success after failures
     rules = {a["rule_key"]: a for a in _alerts(client)}
-    assert rules["auth_failed_burst"]["kind"] == "suspicious_activity"
-    assert "attack" not in rules["auth_failed_burst"]["title"].lower()
     assert "auth_success_after_failures" in rules
     notes = client.get("/api/v1/notifications").json()
     assert any(n["kind"] == "alert.auth_failed_burst" for n in notes)

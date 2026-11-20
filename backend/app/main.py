@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api import agent, auth, billing, devices, employees, identity, oidc, operations, phone, remote, secops, security_mgmt, users
+from app.api import agent, auth, billing, devices, employees, identity, oidc, operations, organizations, phone, remote, secops, security_mgmt, users
 from app.core.config import get_settings
 from app.core.database import session_factory
 from app.core.logging import configure_logging
@@ -73,6 +73,7 @@ def create_app() -> FastAPI:
     api = APIRouter(prefix="/api/v1")
     api.include_router(auth.router)
     api.include_router(users.router)
+    api.include_router(organizations.router)
     api.include_router(employees.router)
     api.include_router(secops.router)  # before operations: /notifications/preferences
     api.include_router(operations.router)

@@ -50,9 +50,8 @@ ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.
 
 
 class StepUp(BaseModel):
-    """A fresh passkey assertion confirming a sensitive action (from /auth/step-up/options)."""
-    challenge_id: uuid.UUID
-    credential: dict
+    """Re-entry of the signed-in admin's password, confirming a sensitive action."""
+    password: str = Field(min_length=1, max_length=200)
 
 
 class ActionRequest(BaseModel):
@@ -83,6 +82,13 @@ class AssistRequest(BaseModel):
     step_up: StepUp | None = None
 
 
+class RdpRequest(BaseModel):
+    """Start an unattended Remote Desktop session. No consent and no password step-up (by design), but the endpoint
+    always shows a visible 'Remote desktop active' banner for the whole session."""
+    reason: str = Field(min_length=5, max_length=500)
+    max_minutes: int = Field(default=30, ge=5, le=120)
+
+
 class TerminateRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
@@ -93,6 +99,8 @@ class SessionOut(ORMModel):
     device_name: str | None = None
     requested_by_label: str
     reason: str
+    mode: str = "assist"
+    connection: str | None = None
     require_consent: bool
     max_minutes: int
     status: str

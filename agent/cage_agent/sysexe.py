@@ -27,6 +27,7 @@ TOOLS = {
     "powershell.exe": r"WindowsPowerShell\v1.0\powershell.exe",
     "shutdown.exe": "shutdown.exe", "taskkill.exe": "taskkill.exe", "tasklist.exe": "tasklist.exe",
     "icacls.exe": "icacls.exe", "secedit.exe": "secedit.exe", "auditpol.exe": "auditpol.exe",
+    "reg.exe": "reg.exe", "netsh.exe": "netsh.exe",
 }
 
 

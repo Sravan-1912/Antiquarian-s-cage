@@ -10,7 +10,7 @@ from typing import TypeVar
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
@@ -157,6 +157,19 @@ def assist_event(session_id: uuid.UUID, ctx: AgentContext = Depends(agent_auth),
     except PolicyError as e:
         raise HTTPException(e.status, e.message)
     return {"session_id": str(sess.id), "status": sess.status}
+
+
+@router.websocket("/rdp/tunnel")
+async def rdp_tunnel_endpoint(ws: WebSocket, session: str, token: str):
+    """Endpoint side of the RDP relay: the agent dials out here and bridges its local 127.0.0.1:3389. Authorised by
+    the short-lived HMAC token handed to the device in the signed rdp.start job (not the usual signed-request auth,
+    which does not apply to a WebSocket)."""
+    from app.services.rdp_relay import hub, verify_token
+    if not verify_token(token, session, "endpoint"):
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    await hub.join(session, "endpoint", ws)
 
 
 # ------------------------------------------------------------------------------- Windows sign-in from the phone

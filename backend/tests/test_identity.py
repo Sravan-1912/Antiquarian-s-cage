@@ -13,7 +13,7 @@ import jwt
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from tests.conftest import ORIGIN, SoftAuthenticator, bootstrap_admin, csrf, enrol_passkey, last_token, login
+from tests.conftest import ORIGIN, SoftAuthenticator, bootstrap_admin, csrf, login
 
 
 def b64u(b: bytes) -> str:
@@ -45,7 +45,8 @@ def test_passkey_register_login_and_revoke(client, outbox):
     login(client, "root@example.com")
     authn = SoftAuthenticator()
     pk = _register_passkey(client, authn)
-    assert pk["name"] == "Laptop" and len(client.get("/api/v1/auth/passkeys").json()) == 2  # + the bootstrap passkey
+    # Passkeys are an optional second method; password sign-in registers none, so this is the only one.
+    assert pk["name"] == "Laptop" and len(client.get("/api/v1/auth/passkeys").json()) == 1
     client.post("/api/v1/auth/logout", headers=csrf(client))
 
     assert _passkey_login(client, authn).status_code == 200
@@ -90,20 +91,25 @@ def test_cloned_authenticator_detected_by_sign_count(client, outbox):
 REDIRECT = "http://localhost:8090/callback"
 
 
-def _employee_with_portal(client, outbox, email="grace@example.com"):
+def _employee_with_portal(client, outbox, email="grace@example.com", password="Grace-Passw0rd-3z"):
     emp = client.post("/api/v1/employees", json={"employee_number": "E1", "full_name": "Grace Hopper", "email": email,
                                                  "department": "Engineering", "job_title": "Engineer"},
                       headers=csrf(client)).json()
     r = client.post(f"/api/v1/employees/{emp['id']}/portal-access", headers=csrf(client))
     assert r.status_code == 200, r.text
+    temp = r.json()["temporary_password"]
     assert client.post(f"/api/v1/employees/{emp['id']}/portal-access", headers=csrf(client)).status_code == 409
-    # The portal invite doubles as a passkey enrolment; enrol the employee's passkey without disturbing the admin session.
+    # Complete the handover: the employee signs in with the temp password and sets a permanent one, without
+    # disturbing the admin session.
     saved = [(c.name, c.value, c.domain, c.path) for c in client.cookies.jar]
     client.cookies.clear()
-    enrol_passkey(client, last_token(outbox, "/accept-invite"), email, "Employee device")
+    assert client.post("/api/v1/auth/login", json={"email": email, "password": temp}).status_code == 200
+    assert client.post("/api/v1/auth/password", json={"current_password": temp, "new_password": password},
+                       headers=csrf(client)).status_code == 200
     client.cookies.clear()
     for name, value, domain, path in saved:
         client.cookies.set(name, value, domain=domain, path=path)
+    client._cage_authn[email] = password
     return emp
 
 
@@ -168,7 +174,7 @@ def test_oidc_full_flow_and_verification(client, outbox):
     jwks = client.get("/api/v1/oidc/jwks").json()
     key = jwt.PyJWK(jwks["keys"][0]).key
     claims = jwt.decode(tok.json()["id_token"], key, algorithms=["RS256"], audience=app["client_id"], issuer=disc["issuer"])
-    assert claims["email"] == "grace@example.com" and claims["nonce"] == "n0nce" and "mfa" in claims["amr"]
+    assert claims["email"] == "grace@example.com" and claims["nonce"] == "n0nce" and "pwd" in claims["amr"]
     assert claims["department"] == "Engineering"
     ui = client.get("/api/v1/oidc/userinfo", headers={"Authorization": f"Bearer {tok.json()['access_token']}"})
     assert ui.json()["sub"] == claims["sub"]
@@ -218,7 +224,7 @@ def test_oidc_rejections(client, outbox):
     assert _token(client, app, code, v, secret="wrong").status_code == 401
 
 
-def test_mfa_required_app_needs_passkey_step_up(client, outbox):
+def test_mfa_required_app_needs_step_up(client, outbox):
     bootstrap_admin(client, outbox)
     login(client, "root@example.com")
     emp = _employee_with_portal(client, outbox)
@@ -226,13 +232,13 @@ def test_mfa_required_app_needs_passkey_step_up(client, outbox):
     client.post(f"/api/v1/applications/{app['id']}/assignments", json={"employee_ids": [emp["id"]]}, headers=csrf(client))
     client.post("/api/v1/auth/logout", headers=csrf(client))
 
-    # Passkey sign-in already satisfies the app's MFA requirement (hardware key + user verification = two factors),
-    # so no step-up is needed and the authorize completes directly.
+    # Password sign-in is a single factor (amr=["pwd"]); an MFA-required app is not satisfied by it, so the authorize
+    # bounces to the console asking for a step-up. (A passkey, the optional second method, carries "mfa" and would pass.)
     login(client, "grace@example.com")
     v, c = _pkce()
-    code = _code(_authorize(client, app, c))
-    claims = jwt.decode(_token(client, app, code, v).json()["id_token"], options={"verify_signature": False})
-    assert "mfa" in claims["amr"] and "hwk" in claims["amr"]
+    r = _authorize(client, app, c)
+    loc = urlparse(r.headers["location"])
+    assert loc.path == "/login" and parse_qs(loc.query).get("step_up") == ["1"]
 
 
 def test_leaver_revokes_portal_sso_and_passkeys(client, outbox):
@@ -253,7 +259,7 @@ def test_leaver_revokes_portal_sso_and_passkeys(client, outbox):
     r = client.post(f"/api/v1/employees/{emp['id']}/offboard", json={"reason": "resigned"}, headers=csrf(client))
     assert r.status_code == 200
     ev = client.get(f"/api/v1/employees/{emp['id']}/events").json()[0]["details"]
-    assert ev["application_access_revoked"] == 1 and ev["passkeys_revoked"] == 2 and ev["portal_account"] == "disabled"
+    assert ev["application_access_revoked"] == 1 and ev["passkeys_revoked"] == 1 and ev["portal_account"] == "disabled"
     assert client.get(f"/api/v1/applications/{app['id']}/assignments").json() == []
     assert all(u["email"] != "grace@example.com" for u in client.get("/api/v1/users").json())  # not an administrator
     client.cookies.clear()

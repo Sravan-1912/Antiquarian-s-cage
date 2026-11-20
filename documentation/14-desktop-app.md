@@ -44,14 +44,19 @@ back it up alongside the database.
 ## First run
 
 1. Launch **Antiquarian's Cage** from the Start Menu.
-2. The window opens on the console. Create the first **Super Admin** and register a
-   **Windows Hello passkey** (PIN, fingerprint, or face — this device becomes your key).
-3. Invite an **Admin** from the console; admins see only the endpoints assigned to them, Super
-   Admins see everything (RBAC + admin isolation are inherited unchanged from the web product).
+2. The window opens on the setup screen. Create the first **Super Admin** — organisation name, your
+   name, email and a **password** (≥12 chars, three of lowercase/uppercase/digits/symbols). You are
+   signed in immediately.
+3. From **Administrators**, create **Admin** accounts (each gets a temporary password to hand over;
+   the admin must change it on first sign-in) and, as a Super Admin, create additional
+   **organisations**. Admins see only the endpoints assigned to them; Super Admins see everything
+   (RBAC + admin isolation are inherited unchanged from the web product).
 4. Enrol endpoints against the app's agent URL (see "Enrolling endpoints" below).
 
-Account recovery (lost passkey) uses the existing break-glass flow:
-`python -m app.recover <email>` run against the same database — documented in the auth guide.
+Sign-in is **password-based**. A passkey can optionally be added per account (Account security) as a
+stronger method; MFA-required SSO apps require one. Account recovery (locked-out Super Admin) uses the
+break-glass CLI `python -m app.recover <email>` against the same database: it prints a one-time
+temporary password the account must change on next sign-in.
 
 ## Enrolling endpoints
 
@@ -121,7 +126,7 @@ script on its own — it needs a certificate that is not part of this repository
 
 ## What the desktop app does *not* change
 
-- Authentication is passkey-only (WebAuthn). No passwords.
+- Authentication is password-based (PBKDF2-HMAC-SHA256, 600k iterations); passkeys are an optional per-account method.
 - RBAC, admin isolation, the audit chain, remote actions, and the agent protocol are identical to
   the web product — the desktop app is a packaging of the same backend, not a fork.
 - The agent (`cage-agent.exe` on Windows, the Linux agent) is unchanged and enrols the same way.
@@ -129,7 +134,7 @@ script on its own — it needs a certificate that is not part of this repository
 ## Limitations / notes
 
 - Windows x64 only (the backend exe and Electron target are x64).
-- Full end-to-end verification (install → launch → passkey → enrol) must be done on a real
+- Full end-to-end verification (install → launch → create Super Admin → create admin/org → enrol) must be done on a real
   Windows 10/11 machine; it cannot be validated in a headless CI environment.
 - Single-instance: launching the app again focuses the existing window instead of starting a
   second backend.

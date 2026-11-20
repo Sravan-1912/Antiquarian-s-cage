@@ -142,7 +142,7 @@ class RenewResponse(BaseModel):
 class EnrollmentTokenCreate(BaseModel):
     label: str = Field(min_length=2, max_length=128)
     employee_id: uuid.UUID | None = None
-    expires_in_minutes: int = Field(default=60, ge=5, le=1440)
+    expires_in_minutes: int | None = Field(default=60, ge=5, le=1440)  # None = indefinite (never expires)
 
 
 class EnrollmentTokenOut(ORMModel):
@@ -150,7 +150,7 @@ class EnrollmentTokenOut(ORMModel):
     label: str
     employee_id: uuid.UUID | None
     created_at: datetime
-    expires_at: datetime
+    expires_at: datetime | None  # None = indefinite (never expires)
     used_at: datetime | None
     used_by_device_id: uuid.UUID | None
     revoked_at: datetime | None

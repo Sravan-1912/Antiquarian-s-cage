@@ -11,6 +11,9 @@
     "start": "electron .",
     "dist": "electron-builder --win nsis"
   },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
   "devDependencies": {
     "electron": "33.2.1",
     "electron-builder": "25.1.8"
@@ -23,7 +26,8 @@
     },
     "files": [
       "main.js",
-      "preload.js"
+      "preload.js",
+      "node_modules/ws/**/*"
     ],
     "extraResources": [
       {
@@ -33,7 +37,12 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "signAndEditExecutable": false
     },

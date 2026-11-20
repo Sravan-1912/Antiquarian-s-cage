@@ -148,20 +148,20 @@ def test_audit_chain_verifies_and_detects_tampering(client, outbox):
 
     with session_factory()() as db:
         if db.bind.dialect.name == "postgresql":
-            return  # UPDATE is blocked by trigger on PostgreSQL; covered by test below
+            return  # UPDATE is blocked by trigger on PostgreSQL; covered by the append-only test below
+        # SQLite: an attacker with direct DB access defeats the append-only triggers first, then tampers.
+        for verb in ("update", "delete"):
+            db.execute(text(f"DROP TRIGGER IF EXISTS audit_logs_no_{verb}"))
         db.execute(text("UPDATE audit_logs SET target_label='tampered' WHERE action='employee.created'"))
         db.commit()
     r = client.post("/api/v1/audit/verify", headers=csrf(client)).json()
     assert r["valid"] is False and "modified" in r["reason"]
 
 
-def test_audit_log_is_append_only_on_postgres(client, outbox):
+def test_audit_log_is_append_only(client, outbox):
+    """audit_logs is append-only at the database level on both PostgreSQL (migration 0001) and SQLite (0015)."""
     from app.core.database import session_factory
 
-    with session_factory()() as db:
-        if db.bind.dialect.name != "postgresql":
-            import pytest
-            pytest.skip("trigger exists only on PostgreSQL")
     bootstrap_admin(client, outbox)
     import pytest
     from sqlalchemy.exc import DBAPIError

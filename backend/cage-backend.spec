@@ -14,8 +14,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 hiddenimports = []
 hiddenimports += collect_submodules("uvicorn")      # loops/protocols selected at runtime by string
+hiddenimports += collect_submodules("websockets")   # uvicorn's WebSocket protocol (RDP relay) is a lazy import
 hiddenimports += collect_submodules("app")          # app.main etc. imported by uvicorn as "app.main:app"
-hiddenimports += ["anyio", "email_validator", "passlib.handlers.argon2"]
+hiddenimports += ["anyio", "email_validator", "passlib.handlers.argon2", "websockets"]
 
 datas = [
     ("migrations", "migrations"),

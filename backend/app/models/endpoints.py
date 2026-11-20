@@ -53,7 +53,7 @@ class EnrollmentToken(UUIDPk, Base):
     employee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    expires_at: Mapped[datetime]
+    expires_at: Mapped[datetime | None]  # None = indefinite (never expires)
     used_at: Mapped[datetime | None]
     used_by_device_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"))
     revoked_at: Mapped[datetime | None]

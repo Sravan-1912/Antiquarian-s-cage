@@ -52,13 +52,15 @@ def _normalise_token(raw: str) -> str:
 
 # ------------------------------------------------------------------------------------------------ tokens
 def create_enrollment_token(db: Session, org_id: uuid.UUID, actor: Actor, *, label: str,
-                            employee_id: uuid.UUID | None, minutes: int,
+                            employee_id: uuid.UUID | None, minutes: int | None,
                             owner_admin_id: uuid.UUID | None = None) -> tuple[EnrollmentToken, str]:
-    minutes = min(minutes, get_settings().enrollment_token_max_minutes)
+    # minutes=None → indefinite token (never expires); otherwise cap to the configured maximum.
+    expires_at = None if minutes is None else utcnow() + timedelta(
+        minutes=min(minutes, get_settings().enrollment_token_max_minutes))
     raw = pki.new_enrollment_secret()
     tok = EnrollmentToken(organization_id=org_id, token_hash=hash_token(_normalise_token(raw)), label=label,
                           employee_id=employee_id, created_by=actor.user_id, owner_admin_id=owner_admin_id,
-                          expires_at=utcnow() + timedelta(minutes=minutes))
+                          expires_at=expires_at)
     db.add(tok)
     db.flush()
     audit.record(db, org_id, actor, "device.enrollment_token_created", target_type="enrollment_token",
@@ -72,7 +74,7 @@ def token_state(tok: EnrollmentToken) -> str:
         return "revoked"
     if tok.used_at:
         return "used"
-    if tok.expires_at < utcnow():
+    if tok.expires_at is not None and tok.expires_at < utcnow():  # None = indefinite
         return "expired"
     return "active"
 
