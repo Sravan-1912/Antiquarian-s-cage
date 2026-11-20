@@ -5,18 +5,19 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { Loader2 } from 'lucide-react'
 import { cn } from '@/utils/format'
 
+// Colors/material come from theme-driven CSS variables (see theme/controls.css: .cage-btn-*), so every button matches
+// the active theme (iOS-26 liquid glass on the glass themes, accent fills elsewhere) with no hardcoded palette here.
 export const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors ' +
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 focus-visible:ring-offset-0 ' +
+  'cage-btn inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ' +
     'disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        primary: 'bg-emerald-600 text-white hover:bg-emerald-500',
-        secondary: 'bg-ink-700 text-silver-100 hover:bg-ink-600 border border-ink-600',
-        ghost: 'text-silver-400 hover:bg-ink-700 hover:text-silver-100',
-        outline: 'border border-ink-600 text-silver-200 hover:bg-ink-700',
-        danger: 'bg-red-600/90 text-white hover:bg-red-500',
+        primary: 'cage-btn-primary',
+        secondary: 'cage-btn-secondary',
+        ghost: 'cage-btn-ghost',
+        outline: 'cage-btn-outline',
+        danger: 'cage-btn-danger',
       },
       size: { sm: 'h-8 px-3 text-xs', md: 'h-9 px-4', lg: 'h-10 px-5', icon: 'h-9 w-9' },
     },
@@ -45,11 +46,7 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
   ({ className, ...props }, ref) => (
     <input
       ref={ref}
-      className={cn(
-        'flex h-9 w-full rounded-md border border-ink-600 bg-ink-900 px-3 text-sm text-silver-100 placeholder:text-silver-600',
-        'focus:border-emerald-600/70 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-50',
-        className,
-      )}
+      className={cn('cage-input flex h-9 w-full rounded-md px-3 text-sm placeholder:text-silver-600 disabled:opacity-50', className)}
       {...props}
     />
   ),
@@ -60,11 +57,7 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
   ({ className, ...props }, ref) => (
     <select
       ref={ref}
-      className={cn(
-        'h-9 rounded-md border border-ink-600 bg-ink-900 px-2.5 text-sm text-silver-100',
-        'focus:border-emerald-600/70 focus:outline-none focus:ring-2 focus:ring-emerald-500/20',
-        className,
-      )}
+      className={cn('cage-input h-9 rounded-md px-2.5 text-sm', className)}
       {...props}
     />
   ),

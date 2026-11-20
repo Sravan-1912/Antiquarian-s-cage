@@ -53,24 +53,7 @@ html { transition: none; }
   box-shadow: inset 1px 1px 0 rgba(255,255,255,0.18), 0 10px 40px -12px rgba(0,0,0,0.5);
 }
 
-/* Frosted CONTROLS for the glass family: buttons, inputs and selects get the blur + a specular rim, and the colored
-   CTAs (primary/danger) go translucent so the frost shows through while keeping their hue. */
-[data-theme="liquid-glass"] button, [data-theme="crimson-glass"] button, [data-theme="custom-wallpaper"] button,
-[data-theme="liquid-glass"] input, [data-theme="crimson-glass"] input, [data-theme="custom-wallpaper"] input,
-[data-theme="liquid-glass"] select, [data-theme="crimson-glass"] select, [data-theme="custom-wallpaper"] select {
-  backdrop-filter: blur(12px) saturate(160%); -webkit-backdrop-filter: blur(12px) saturate(160%);
-}
-/* Translucent colored CTAs (attribute selectors avoid escaping the `/` in bg-red-600/90). */
-[data-theme="liquid-glass"] [class~="bg-emerald-600"], [data-theme="crimson-glass"] [class~="bg-emerald-600"], [data-theme="custom-wallpaper"] [class~="bg-emerald-600"] {
-  background-color: color-mix(in srgb, var(--color-emerald-600) 60%, transparent);
-}
-[data-theme="liquid-glass"] [class~="bg-red-600/90"], [data-theme="crimson-glass"] [class~="bg-red-600/90"], [data-theme="custom-wallpaper"] [class~="bg-red-600/90"] {
-  background-color: color-mix(in srgb, var(--color-red-600) 68%, transparent);
-}
-/* Specular rim on every control so edges catch the light. */
-[data-theme="liquid-glass"] button, [data-theme="crimson-glass"] button, [data-theme="custom-wallpaper"] button {
-  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.22), 0 6px 18px -8px rgba(0,0,0,0.45);
-}
+/* (Button & input materials are handled per-theme in theme/controls.css via .cage-btn / .cage-input tokens.) */
 
 /* ============================================================== 2. Liquid Glass — Custom Wallpaper */
 [data-theme="custom-wallpaper"] {

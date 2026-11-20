@@ -4,6 +4,7 @@ import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
 import './theme/themes.css'  // after index.css so [data-theme] overrides win in the cascade
+import './theme/controls.css' // theme-driven button/input material
 import { ThemeProvider } from '@/theme/ThemeContext'
 import { ThemesPage } from '@/modules/settings/ThemesPage'
 import { AuthProvider, useAuth } from '@/hooks/useAuth'
