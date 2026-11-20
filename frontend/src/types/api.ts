@@ -216,6 +216,7 @@ export interface Inventory {
 export interface DeviceCertificate { id: string; serial: string; fingerprint_sha256: string; not_before: string; not_after: string; status: string; revoked_at: string | null; revoked_reason: string | null; created_at: string }
 export interface DeviceEvent { id: string; kind: string; details: Record<string, unknown>; actor_id: string | null; created_at: string }
 export interface Heartbeat { received_at: string; source_ip: string | null; agent_version: string | null; uptime_seconds: number | null }
+export interface RiskScore { score: number; level: 'low' | 'medium' | 'high' | 'critical'; factors: { factor: string; detail: string; points: number }[] }
 
 export interface EnrollmentToken {
   id: string

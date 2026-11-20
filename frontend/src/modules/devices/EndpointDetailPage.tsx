@@ -6,7 +6,7 @@ import { Alert, Badge, Button, Card, CardHeader, EmptyState, Field, Input, Selec
 import { Dialog } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
-import type { AdminUser, Device, DeviceCertificate, DeviceEvent, Employee, Heartbeat, Inventory, NetworkUsage, Page } from '@/types/api'
+import type { AdminUser, Device, DeviceCertificate, DeviceEvent, Employee, Heartbeat, Inventory, NetworkUsage, Page, RiskScore } from '@/types/api'
 import { formatDateTime, relativeTime } from '@/utils/format'
 import { ConnectivityBadge, DeviceStatusBadge, SECURITY_LABELS, SecurityStateBadge, formatBytes } from './shared'
 import { DeviceComplianceCard, DevicePoliciesCard } from '@/modules/compliance/DeviceComplianceCard'
@@ -43,6 +43,7 @@ export function EndpointDetailPage() {
   const certs = useQuery({ queryKey: ['device', id, 'certs'], queryFn: () => api.get<DeviceCertificate[]>(`/devices/${id}/certificates`) })
   const net = useQuery({ queryKey: ['device', id, 'network'], queryFn: () => api.get<NetworkUsage>(`/devices/${id}/network`), refetchInterval: 60_000 })
   const beats = useQuery({ queryKey: ['device', id, 'heartbeats'], queryFn: () => api.get<Heartbeat[]>(`/devices/${id}/heartbeats`), refetchInterval: 30_000 })
+  const risk = useQuery({ queryKey: ['device', id, 'risk'], queryFn: () => api.get<RiskScore>(`/devices/${id}/risk`), refetchInterval: 30_000 })
   const employees = useQuery({ queryKey: ['employees', 'active-all'], queryFn: () => api.get<Page<Employee>>('/employees?status=active&page_size=100'), enabled: editing })
   const admins = useQuery({ queryKey: ['admins'], queryFn: () => api.get<AdminUser[]>('/users'), enabled: editing && can('users:read') })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['device', id] }); qc.invalidateQueries({ queryKey: ['devices'] }) }
@@ -71,6 +72,12 @@ export function EndpointDetailPage() {
             <h1 className="text-lg font-semibold text-silver-50">{d.display_name}</h1>
             <DeviceStatusBadge status={d.status} />
             <ConnectivityBadge c={d.connectivity} last={d.last_heartbeat_at} />
+            {risk.data && (
+              <Badge tone={risk.data.level === 'low' ? 'success' : risk.data.level === 'medium' ? 'warning' : 'danger'}
+                title={risk.data.factors.map((f) => `${f.factor}: ${f.detail} (+${f.points})`).join('\n') || 'No risk factors'}>
+                Risk {risk.data.score} · {risk.data.level}
+              </Badge>
+            )}
           </div>
           <p className="mt-0.5 text-sm text-silver-500">{[d.manufacturer, d.model].filter(Boolean).join(' ') || 'Hardware not yet reported'} · <span className="font-mono text-xs">{d.id}</span></p>
         </div>

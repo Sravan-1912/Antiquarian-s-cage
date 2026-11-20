@@ -190,6 +190,13 @@ def get_device(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: Sessi
     return _out(db, _get(db, ctx, device_id))
 
 
+@router.get("/devices/{device_id}/risk")
+def device_risk(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """Continuous risk score (0–100) synthesised from compliance, open alerts/detections and connectivity."""
+    from app.services import risk
+    return risk.device_risk(db, _get(db, ctx, device_id))
+
+
 @router.get("/devices/{device_id}/inventory", response_model=s.InventoryOut | None)
 def latest_inventory(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
     _get(db, ctx, device_id)

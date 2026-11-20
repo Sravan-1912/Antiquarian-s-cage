@@ -186,6 +186,21 @@ def test_telemetry_stream_raises_edr_alert(client, outbox):
     assert edr and edr[0]["severity"] == "high"
 
 
+def test_device_risk_reflects_alerts(client, outbox):
+    _admin(client, outbox)
+    agent = FakeAgent(client)
+    agent.enroll(_token(client)["token"])
+    base = client.get(f"/api/v1/devices/{agent.device_id}/risk").json()
+    assert base["score"] >= 20 and any(f["factor"] == "compliance" for f in base["factors"])
+    # A high EDR detection should raise the score and add an "alerts" factor.
+    agent.signed("/agent/v1/telemetry", {"events": [
+        {"type": "process_created", "data": {"name": "powershell.exe", "cmdline": "powershell -EncodedCommand ZQBjAGgA"}}]})
+    after = client.get(f"/api/v1/devices/{agent.device_id}/risk").json()
+    assert after["score"] > base["score"]
+    assert any(f["factor"] == "alerts" for f in after["factors"])
+    assert after["level"] in ("medium", "high", "critical")
+
+
 def test_lifecycle_suspend_revoke_unenroll(client, outbox):
     _admin(client, outbox)
     agent = FakeAgent(client)
