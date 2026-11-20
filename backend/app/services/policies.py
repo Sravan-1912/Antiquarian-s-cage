@@ -29,6 +29,7 @@ COMMAND_TTL_MINUTES: dict[str, int | None] = {
     "account.disable": 60, "account.enable": 60, "account.remove_admin": 60,
     "assist.start": 10, "assist.end": 30,
     "rdp.start": 10, "rdp.end": 30,
+    "shell.start": 10, "shell.end": 30,
 }
 COMMANDS = set(COMMAND_TTL_MINUTES)
 

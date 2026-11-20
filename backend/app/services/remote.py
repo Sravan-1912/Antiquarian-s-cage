@@ -129,8 +129,50 @@ def request_rdp_session(db: Session, device: Device, reason: str, max_minutes: i
     return s
 
 
+def request_shell_session(db: Session, device: Device, reason: str, max_minutes: int, elevated: bool,
+                          actor: Actor) -> RemoteSession:
+    """Open an interactive live-response shell (arbitrary command execution — break-glass). RBAC is enforced by the
+    caller; the endpoint always shows a visible banner for the whole session (the agent fails closed if it cannot show
+    it), and the agent writes every command + output to the audit trail."""
+    if device.status != "active":
+        raise PolicyError(f"Endpoint is {device.status}", 409)
+    if devices.connectivity(device) != "online":
+        raise PolicyError("Endpoint is offline; a live-response shell needs a connected endpoint", 409)
+    cfg = assist_settings(db, device.organization_id)
+    if max_minutes > cfg.max_session_minutes:
+        raise PolicyError(f"Sessions are limited to {cfg.max_session_minutes} minutes by organisation policy", 422)
+    live = db.scalar(select(RemoteSession).where(RemoteSession.device_id == device.id,
+                                                 RemoteSession.status.in_(("requested", "awaiting_consent", "active", "ending"))))
+    if live:
+        refresh(db, live)
+        if live.status not in TERMINAL:
+            raise PolicyError("A remote session is already open for this endpoint", 409)
+    s = RemoteSession(id=uuid.uuid4(), organization_id=device.organization_id, device_id=device.id,
+                      requested_by=actor.user_id, requested_by_label=actor.label, reason=reason, mode="shell",
+                      require_consent=False, max_minutes=max_minutes, status="requested")
+    db.add(s)
+    db.flush()
+    from app.services.rdp_relay import mint_token
+    job = policies.create_job(db, device, "shell.start", {
+        "session_id": str(s.id), "requested_by": actor.label, "reason": reason, "max_minutes": max_minutes,
+        "elevated": bool(elevated),
+        "tunnel_token": mint_token(str(s.id), "endpoint", ttl_seconds=max_minutes * 60 + 600),
+    }, actor, idempotency_key=f"shell:{s.id}:start")
+    s.start_job_id = job.id
+    audit.record(db, device.organization_id, actor, "remote.shell_requested", target_type="device",
+                 target_id=device.id, target_label=device.hostname,
+                 metadata={"session_id": str(s.id), "reason": reason, "max_minutes": max_minutes, "elevated": bool(elevated)})
+    notifications.notify_users(
+        db, device.organization_id, notifications.users_with_permission(db, device.organization_id, "devices:manage"),
+        kind="remote.shell_requested", severity="high",
+        title=f"Live-response shell opened: {device.hostname}",
+        body=f"{actor.label}{' (elevated)' if elevated else ''}: {reason}", link=f"/endpoints/{device.id}")
+    db.commit()
+    return s
+
+
 def _end_command(s: RemoteSession) -> str:
-    return "rdp.end" if s.mode == "rdp" else "assist.end"
+    return {"rdp": "rdp.end", "shell": "shell.end"}.get(s.mode, "assist.end")
 
 
 def terminate(db: Session, s: RemoteSession, reason: str, actor: Actor) -> RemoteSession:
@@ -216,25 +258,28 @@ def on_job_result(db: Session, device: Device, job: CommandJob, status: str, det
                      metadata={"session_id": str(s.id), "consent": decision, "consent_user": s.consent_user,
                                "detail": (detail or "")[:300]})
         return
-    if job.command == "rdp.start":
+    if job.command in ("rdp.start", "shell.start"):
         s = db.get(RemoteSession, uuid.UUID(job.parameters["session_id"]))
         if s is None or s.device_id != device.id or s.status in TERMINAL:
             return
+        kind = "rdp" if job.command == "rdp.start" else "shell"
         if status == "succeeded":
             now = utcnow()
             s.status, s.started_at = "active", now
             s.consent_decision = "not_required"
             s.expires_at = now + timedelta(minutes=s.max_minutes)
-            s.connection = str(state.get("connection") or "")[:128] or None
-            action = "remote.rdp_started"
+            if kind == "rdp":
+                s.connection = str(state.get("connection") or "")[:128] or None
+            action = f"remote.{kind}_started"
         else:
-            _close(s, "failed", "system", detail or "Endpoint could not start the remote desktop session")
-            action = "remote.rdp_failed"
+            label = "remote desktop" if kind == "rdp" else "live-response shell"
+            _close(s, "failed", "system", detail or f"Endpoint could not start the {label} session")
+            action = f"remote.{kind}_failed"
         audit.record(db, device.organization_id, actor, action, target_type="device", target_id=device.id,
                      target_label=device.hostname, result="success" if s.status == "active" else "failure",
                      metadata={"session_id": str(s.id), "connection": s.connection, "detail": (detail or "")[:300]})
         return
-    if job.command in ("assist.end", "rdp.end"):
+    if job.command in ("assist.end", "rdp.end", "shell.end"):
         s = db.get(RemoteSession, uuid.UUID(job.parameters["session_id"]))
         if s is None:
             return

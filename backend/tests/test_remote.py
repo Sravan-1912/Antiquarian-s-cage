@@ -137,6 +137,38 @@ def test_rdp_unattended_session_lifecycle(client, outbox):
     assert {"remote.rdp_requested", "remote.rdp_started"} <= actions
 
 
+def test_shell_session_lifecycle_and_elevated_flag(client, outbox):
+    agent = _setup(client, outbox)
+    # Live-response shell: break-glass arbitrary execution, gated by RBAC + banner + audit.
+    r = client.post(f"/api/v1/devices/{agent.device_id}/shell",
+                    json={"reason": "Investigate suspicious process", "max_minutes": 15, "elevated": True},
+                    headers=csrf(client))
+    assert r.status_code == 201, r.text
+    s = r.json()
+    assert s["mode"] == "shell" and s["status"] == "requested"
+    # One open remote session per endpoint (shared across rdp/assist/shell).
+    assert client.post(f"/api/v1/devices/{agent.device_id}/shell", json={"reason": "again please", "max_minutes": 10},
+                       headers=csrf(client)).status_code == 409
+
+    env = _next_job(agent)
+    assert env["command"] == "shell.start" and env["parameters"]["elevated"] is True
+    assert env["parameters"]["tunnel_token"] and env["parameters"]["session_id"] == s["id"]
+    agent.signed(f"/agent/v1/jobs/{env['job_id']}/result", {"status": "succeeded"})
+    assert client.get(f"/api/v1/remote-sessions/{s['id']}").json()["status"] == "active"
+
+    # Operator attaches over the relay; the connect payload carries the device key for the E2E handshake.
+    conn = client.post(f"/api/v1/remote-sessions/{s['id']}/shell-connect", headers=csrf(client))
+    assert conn.status_code == 200 and conn.json()["operator_token"] and conn.json()["endpoint_public_key"]
+
+    client.post(f"/api/v1/remote-sessions/{s['id']}/terminate", json={"reason": "done"}, headers=csrf(client))
+    end = _next_job(agent)
+    assert end["command"] == "shell.end" and end["parameters"]["session_id"] == s["id"]
+    agent.signed(f"/agent/v1/jobs/{end['job_id']}/result", {"status": "succeeded"})
+    assert client.get(f"/api/v1/remote-sessions/{s['id']}").json()["status"] == "ended"
+    acts = {a["action"] for a in client.get("/api/v1/audit", params={"action": "remote.shell"}).json()["items"]}
+    assert "remote.shell_requested" in acts
+
+
 def test_rdp_relay_pipes_bytes_and_rejects_bad_token(client, outbox):
     from app.services.rdp_relay import mint_token
     sid = "11111111-1111-1111-1111-111111111111"

@@ -89,6 +89,15 @@ class RdpRequest(BaseModel):
     max_minutes: int = Field(default=30, ge=5, le=120)
 
 
+class ShellRequest(BaseModel):
+    """Open an interactive live-response shell. Arbitrary command execution (break-glass): RBAC-gated, the endpoint
+    always shows a visible banner, and every command + output is written to the audit trail. `elevated` runs it as
+    SYSTEM/root (needs devices:shell_elevated)."""
+    reason: str = Field(min_length=5, max_length=500)
+    max_minutes: int = Field(default=30, ge=5, le=120)
+    elevated: bool = False
+
+
 class TerminateRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 

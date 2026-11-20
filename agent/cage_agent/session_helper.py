@@ -81,7 +81,7 @@ def consent(requester: str, reason: str, minutes: int, timeout: int) -> dict:
 
 def indicator(requester: str, reason: str, minutes: int, kind: str = "assist") -> dict:
     import tkinter as tk
-    label = "REMOTE DESKTOP ACTIVE" if kind == "rdp" else "REMOTE ASSISTANCE ACTIVE"
+    label = {"rdp": "REMOTE DESKTOP ACTIVE", "shell": "LIVE-RESPONSE SHELL ACTIVE"}.get(kind, "REMOTE ASSISTANCE ACTIVE")
     result = {"ended": "expired"}
     root = tk.Tk()
     root.title(label.title())
@@ -124,7 +124,7 @@ def main(argv=None) -> int:
     p.add_argument("--reason", required=True)
     p.add_argument("--minutes", type=int, required=True)
     p.add_argument("--timeout", type=int, default=120)
-    p.add_argument("--kind", choices=["assist", "rdp"], default="assist")
+    p.add_argument("--kind", choices=["assist", "rdp", "shell"], default="assist")
     a = p.parse_args(argv)
     out = consent(a.requester, a.reason, a.minutes, a.timeout) if a.mode == "consent" else \
         indicator(a.requester, a.reason, a.minutes, a.kind)

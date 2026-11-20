@@ -36,6 +36,7 @@ class JobExecutor:
         self.session_event: Callable[[str, str, str | None], None] | None = None
         self.assist = None
         self.rdp = None
+        self.shell = None
 
     # ------------------------------------------------------------------ key pinning
     def pinned_key(self, offered: dict | None) -> PinnedKey:
@@ -98,6 +99,10 @@ class JobExecutor:
                     self._rdp(report).start(env) if command == "rdp.start" else self._rdp(report).end(env)
                     handled += 1
                     continue  # the rdp manager reports asynchronously
+                if command.startswith("shell."):
+                    self._shell(report).start(env) if command == "shell.start" else self._shell(report).end(env)
+                    handled += 1
+                    continue  # the shell manager reports asynchronously
                 if command.startswith("policy.") and sys.platform.startswith("linux"):
                     result = self._run_policy_linux(command, env["parameters"])
                 elif self._runs_locally(command):
@@ -200,3 +205,16 @@ class JobExecutor:
                                   ca_bundle=getattr(self.cfg, "ca_bundle", None),
                                   device_sign=getattr(self, "device_sign", None))
         return self.rdp
+
+    def _shell(self, report: Callable[[str, dict], None]):
+        if self.shell is None:
+            from cage_agent.remote.shell import ShellManager
+
+            def rep(job_id: str, result: dict) -> None:
+                self._finish(job_id, result, report)
+
+            self.shell = ShellManager(rep, self.session_event or (lambda *a: None),
+                                      server_url=getattr(self.cfg, "server_url", ""),
+                                      ca_bundle=getattr(self.cfg, "ca_bundle", None),
+                                      device_sign=getattr(self, "device_sign", None))
+        return self.shell
