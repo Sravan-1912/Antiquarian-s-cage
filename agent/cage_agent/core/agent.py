@@ -92,6 +92,10 @@ class Agent:
         from cage_agent.commands.executor import JobExecutor
         self.executor = JobExecutor(paths.root, self.cfg, lambda: configuration.save(self.paths, self.cfg))
         self.executor.session_event = self._session_event
+        # Device-key signer for the end-to-end (zero-knowledge relay) handshake (ECDSA P-256 over the exchanged keys).
+        from cryptography.hazmat.primitives import hashes as _h
+        from cryptography.hazmat.primitives.asymmetric import ec as _ec
+        self.executor.device_sign = lambda msg: self.key.sign(msg, _ec.ECDSA(_h.SHA256()))
 
     def _session_event(self, session_id: str, event: str, detail: str | None) -> None:
         try:

@@ -74,8 +74,9 @@ export function RemotePanel({ device }: { device: Device }) {
     mutationFn: async (sessionId: string) => {
       const bridge = (window as unknown as { cageRdp?: { connect: (i: unknown) => Promise<unknown> } }).cageRdp
       if (!bridge?.connect) throw new Error('Remote Desktop connect runs in the installed desktop app. Open this console in the Antiquarian’s Cage desktop app.')
-      const t = await api.post<{ operator_token: string; tunnel_path: string }>(`/remote-sessions/${sessionId}/rdp-connect`)
-      await bridge.connect({ sessionId, token: t.operator_token, tunnelPath: t.tunnel_path })
+      const t = await api.post<{ operator_token: string; tunnel_path: string; endpoint_public_key: string | null }>(`/remote-sessions/${sessionId}/rdp-connect`)
+      // endpointPublicKey enables the end-to-end encrypted (zero-knowledge) relay in the desktop helper.
+      await bridge.connect({ sessionId, token: t.operator_token, tunnelPath: t.tunnel_path, endpointPublicKey: t.endpoint_public_key })
     },
     onSuccess: () => setRdpConnectMsg({ tone: 'success', text: 'Opening Remote Desktop… the connection is tunnelled through the server.' }),
     onError: (e) => setRdpConnectMsg({ tone: 'danger', text: describeError(e) }),

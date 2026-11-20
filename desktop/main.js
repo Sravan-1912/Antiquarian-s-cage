@@ -17,23 +17,72 @@ let backendPort = null;
 let mainWindow = null;
 let appOrigin = null;  // the backend origin the console is loaded from (loopback or a remote/cloud backend)
 
+// --- End-to-end encryption (zero-knowledge relay), operator/initiator side -------------------------
+// Mirrors agent/cage_agent/remote/e2e.py byte-for-byte: X25519 ECDH → HKDF-SHA256 → ChaCha20-Poly1305,
+// the endpoint's ephemeral key authenticated by its device key (ECDSA P-256). The backend relay only moves ciphertext.
+const crypto = require("crypto");
+const E2E_MAGIC = Buffer.from("CAGEE2E1");
+const E2E_PROTO = Buffer.from("cage-rdp-e2e-v1");
+const X25519_SPKI_PREFIX = Buffer.from("302a300506032b656e032100", "hex"); // DER SPKI header for an X25519 public key
+
+function x25519Raw(pub) { const der = pub.export({ type: "spki", format: "der" }); return der.subarray(der.length - 32); }
+function importX25519(raw) {
+  return crypto.createPublicKey({ key: Buffer.concat([X25519_SPKI_PREFIX, raw]), format: "der", type: "spki" });
+}
+function e2eInitiate() { const kp = crypto.generateKeyPairSync("x25519"); return { priv: kp.privateKey, epk: x25519Raw(kp.publicKey) }; }
+function e2eComplete(state, epkO, auth, endpointPubPem) {
+  const epkE = auth.subarray(0, 32);
+  const sigLen = auth.readUInt16BE(32);
+  const sig = auth.subarray(34, 34 + sigLen);
+  const msg = Buffer.concat([E2E_PROTO, epkO, epkE]);
+  if (!crypto.verify("sha256", msg, { key: endpointPubPem, dsaEncoding: "der" }, sig))
+    throw new Error("endpoint device signature invalid — possible relay MITM");
+  const shared = crypto.diffieHellman({ privateKey: state.priv, publicKey: importX25519(epkE) });
+  const okm = Buffer.from(crypto.hkdfSync("sha256", shared, Buffer.concat([epkO, epkE]), E2E_PROTO, 64));
+  return { kSend: okm.subarray(0, 32), kRecv: okm.subarray(32, 64), sendCtr: 0, recvCtr: 0 }; // operator: send k_i2r, recv k_r2i
+}
+function e2eNonce(ctr) { const b = Buffer.alloc(12); b.writeBigUInt64BE(BigInt(ctr), 4); return b; }
+function e2eSeal(s, pt) {
+  const c = crypto.createCipheriv("chacha20-poly1305", s.kSend, e2eNonce(s.sendCtr++), { authTagLength: 16 });
+  return Buffer.concat([c.update(pt), c.final(), c.getAuthTag()]);
+}
+function e2eOpen(s, frame) {
+  const d = crypto.createDecipheriv("chacha20-poly1305", s.kRecv, e2eNonce(s.recvCtr++), { authTagLength: 16 });
+  d.setAuthTag(frame.subarray(frame.length - 16));
+  return Buffer.concat([d.update(frame.subarray(0, frame.length - 16)), d.final()]);
+}
+
 // --- RDP relay: tunnel a local mstsc connection out to the backend relay --------------------------
 // mstsc → 127.0.0.1:<localPort> (this listener) → WebSocket to <origin>/api/v1/rdp/tunnel → backend relay → endpoint.
-// Works across any network: both ends dial out, so no inbound firewall rule is needed anywhere.
-function startRdpTunnel({ sessionId, token, tunnelPath }) {
+// Works across any network: both ends dial out, so no inbound firewall rule is needed anywhere. When the endpoint's
+// device public key is known, the stream is end-to-end encrypted (the relay sees only ciphertext).
+function startRdpTunnel({ sessionId, token, tunnelPath, endpointPublicKey }) {
   return new Promise((resolve, reject) => {
     const wsBase = appOrigin.replace(/^http/, "ws").replace(/\/$/, "");
     const wsUrl = `${wsBase}${tunnelPath}?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(token)}`;
     const server = net.createServer((socket) => {
       const ws = new WebSocket(wsUrl);
       ws.binaryType = "nodebuffer";
+      const e2e = !!endpointPublicKey;
       const queue = [];
-      let open = false;
-      ws.on("open", () => { open = true; for (const d of queue) ws.send(d); queue.length = 0; });
-      ws.on("message", (d) => socket.write(d));
+      let wsOpen = false, sess = null, hs = null, epkO = null, hsDone = !e2e;
+      const flush = () => { for (const d of queue) sendUp(d); queue.length = 0; };
+      const sendUp = (d) => { if (ws.readyState === WebSocket.OPEN) ws.send(sess ? e2eSeal(sess, d) : d); else queue.push(d); };
+      ws.on("open", () => {
+        wsOpen = true;
+        if (e2e) { hs = e2eInitiate(); epkO = hs.epk; ws.send(Buffer.concat([E2E_MAGIC, epkO])); }  // HELLO (unencrypted)
+        else flush();
+      });
+      ws.on("message", (d) => {
+        if (e2e && !hsDone) {
+          try { sess = e2eComplete(hs, epkO, d, endpointPublicKey); } catch (err) { socket.destroy(); try { ws.close(); } catch (_) {} return; }
+          hsDone = true; flush(); return;
+        }
+        socket.write(sess ? e2eOpen(sess, d) : d);
+      });
       ws.on("close", () => socket.destroy());
       ws.on("error", () => socket.destroy());
-      socket.on("data", (d) => { if (open && ws.readyState === WebSocket.OPEN) ws.send(d); else queue.push(d); });
+      socket.on("data", (d) => { if (wsOpen && hsDone) sendUp(d); else queue.push(d); });
       socket.on("close", () => { try { ws.close(); } catch (_) {} server.close(); });
       socket.on("error", () => { try { ws.close(); } catch (_) {} });
     });

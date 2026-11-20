@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import AuthContext, rate_limit, require_permission
 from app.api.devices import _get as get_device
 from app.core.database import get_db
-from app.models import CommandJob, Device, RemoteSession
+from app.models import CommandJob, Device, DeviceCertificate, RemoteSession
 from app.schemas import remote as s
 from app.security import passwords
 from app.services import audit, remote
@@ -117,11 +117,17 @@ def rdp_connect(session_id: uuid.UUID, ctx: AuthContext = Depends(REMOTE), db: S
     if sess.mode != "rdp" or sess.status != "active":
         raise HTTPException(409, "No active remote-desktop session for this endpoint")
     from app.services.rdp_relay import mint_token
+    # The endpoint's active device public key lets the operator's helper VERIFY the end-to-end (zero-knowledge relay)
+    # handshake signature, so a tampering relay cannot substitute its own key. The relay itself never sees the session.
+    cert = db.scalar(select(DeviceCertificate).where(DeviceCertificate.device_id == sess.device_id,
+                                                     DeviceCertificate.status == "active")
+                     .order_by(DeviceCertificate.created_at.desc()).limit(1))
     audit.record(db, ctx.user.organization_id, ctx.actor, "remote.rdp_connect", target_type="device",
                  target_id=sess.device_id, target_label=None, metadata={"session_id": str(sess.id)})
     db.commit()
     return {"session_id": str(sess.id), "operator_token": mint_token(str(sess.id), "operator"),
-            "tunnel_path": "/api/v1/rdp/tunnel"}
+            "tunnel_path": "/api/v1/rdp/tunnel",
+            "endpoint_public_key": cert.public_key_pem if cert else None}
 
 
 @router.websocket("/rdp/tunnel")

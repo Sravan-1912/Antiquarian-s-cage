@@ -197,5 +197,6 @@ class JobExecutor:
 
             self.rdp = RdpManager(rep, self.session_event or (lambda *a: None), broker_call=self.broker_call,
                                   server_url=getattr(self.cfg, "server_url", ""),
-                                  ca_bundle=getattr(self.cfg, "ca_bundle", None))
+                                  ca_bundle=getattr(self.cfg, "ca_bundle", None),
+                                  device_sign=getattr(self, "device_sign", None))
         return self.rdp

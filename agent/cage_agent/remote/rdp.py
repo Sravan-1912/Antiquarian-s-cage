@@ -32,6 +32,10 @@ from cage_agent.remote.assist import _helper_cmd as _assist_helper_cmd, _interac
 log = logging.getLogger("cage_agent.rdp")
 LOCAL_RDP = ("127.0.0.1", 3389)
 _IS_WIN = sys.platform == "win32"
+# An E2E-capable operator sends this magic + its X25519 public key as its first frame; a plaintext operator sends raw
+# RDP bytes (which begin 0x03 0x00 — a TPKT header — never this magic), so the two are unambiguous and plaintext still
+# works unchanged. See remote/e2e.py.
+E2E_MAGIC = b"CAGEE2E1"
 
 
 def _banner_cmd(p: dict) -> list[str]:
@@ -74,32 +78,35 @@ def _ws_url(server_url: str, session_id: str, token: str) -> str:
     return f"{base}/agent/v1/rdp/tunnel?session={session_id}&token={token}"
 
 
-def run_tunnel(server_url: str, ca_bundle: str | None, session_id: str, token: str, stop: threading.Event) -> None:
-    """Keep an outbound relay tunnel to the backend while the session lasts, reconnecting between operator sessions."""
+def run_tunnel(server_url: str, ca_bundle: str | None, session_id: str, token: str, stop: threading.Event,
+               device_sign: Callable[[bytes], bytes] | None = None) -> None:
+    """Keep an outbound relay tunnel to the backend while the session lasts, reconnecting between operator sessions.
+    `device_sign` (ECDSA over bytes with the device key) enables the end-to-end encrypted path when the operator asks."""
     url = _ws_url(server_url, session_id, token)
     ctx = None
     if url.startswith("wss://"):
         ctx = ssl.create_default_context(cafile=ca_bundle) if ca_bundle else ssl.create_default_context()
     try:
-        asyncio.run(_tunnel_main(url, ctx, stop))
+        asyncio.run(_tunnel_main(url, ctx, stop, device_sign))
     except Exception as exc:  # noqa: BLE001 — tunnel is best-effort; the session/banner own the lifecycle
         log.warning("rdp tunnel stopped: %s", exc)
 
 
-async def _tunnel_main(url: str, ctx: ssl.SSLContext | None, stop: threading.Event) -> None:
+async def _tunnel_main(url: str, ctx: ssl.SSLContext | None, stop: threading.Event,
+                       device_sign: Callable[[bytes], bytes] | None = None) -> None:
     import websockets
     while not stop.is_set():
         try:
             async with websockets.connect(url, ssl=ctx, max_size=None, open_timeout=20, ping_interval=20) as ws:
-                await _bridge_once(ws, stop)
+                await _bridge_once(ws, stop, device_sign)
         except Exception as exc:  # noqa: BLE001
             log.debug("rdp tunnel reconnect after: %s", exc)
         if not stop.is_set():
             await asyncio.sleep(1)
 
 
-async def _bridge_once(ws, stop: threading.Event) -> None:
-    # The RDP client (mstsc) speaks first; wait for its first bytes before touching the local RDP service.
+async def _bridge_once(ws, stop: threading.Event, device_sign: Callable[[bytes], bytes] | None = None) -> None:
+    # The operator speaks first: either an E2E HELLO (magic + X25519 key) or raw RDP bytes (mstsc's TPKT header).
     try:
         first = await asyncio.wait_for(ws.recv(), timeout=110)
     except asyncio.TimeoutError:
@@ -107,6 +114,16 @@ async def _bridge_once(ws, stop: threading.Event) -> None:
     if stop.is_set():
         return
     first = first.encode() if isinstance(first, str) else first
+    session = None
+    if device_sign is not None and first.startswith(E2E_MAGIC):
+        from cage_agent.remote import e2e
+        try:
+            auth, session = e2e.respond(first[len(E2E_MAGIC):], device_sign)
+        except e2e.E2EError as exc:
+            log.warning("e2e handshake rejected: %s", exc)
+            return
+        await ws.send(auth)
+        first = None  # the operator's RDP bytes now arrive as encrypted frames
     loop = asyncio.get_event_loop()
     try:
         sock = await loop.run_in_executor(None, _connect_local_rdp)
@@ -116,9 +133,10 @@ async def _bridge_once(ws, stop: threading.Event) -> None:
     if sock is None:
         return
     try:
-        await loop.sock_sendall(sock, first)
-        t1 = asyncio.create_task(_ws_to_sock(ws, sock, loop))
-        t2 = asyncio.create_task(_sock_to_ws(ws, sock, loop))
+        if first:
+            await loop.sock_sendall(sock, first)
+        t1 = asyncio.create_task(_ws_to_sock(ws, sock, loop, session))
+        t2 = asyncio.create_task(_sock_to_ws(ws, sock, loop, session))
         _done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
@@ -132,17 +150,20 @@ def _connect_local_rdp() -> socket.socket | None:
     return s
 
 
-async def _ws_to_sock(ws, sock, loop) -> None:
+async def _ws_to_sock(ws, sock, loop, session=None) -> None:
     async for msg in ws:
-        await loop.sock_sendall(sock, msg.encode() if isinstance(msg, str) else msg)
+        data = msg.encode() if isinstance(msg, str) else msg
+        if session is not None:
+            data = session.open(data)  # decrypt the operator→endpoint frame
+        await loop.sock_sendall(sock, data)
 
 
-async def _sock_to_ws(ws, sock, loop) -> None:
+async def _sock_to_ws(ws, sock, loop, session=None) -> None:
     while True:
         data = await loop.sock_recv(sock, 65536)
         if not data:
             return
-        await ws.send(data)
+        await ws.send(session.seal(data) if session is not None else data)  # encrypt endpoint→operator
 
 
 @dataclass
@@ -155,12 +176,14 @@ class _Live:
 
 class RdpManager:
     def __init__(self, report: Callable[[str, dict], None], event: Callable[[str, str, str | None], None],
-                 broker_call: Callable[[dict], dict] | None = None, server_url: str = "", ca_bundle: str | None = None):
+                 broker_call: Callable[[dict], dict] | None = None, server_url: str = "", ca_bundle: str | None = None,
+                 device_sign: Callable[[bytes], bytes] | None = None):
         self.report = report          # (job_id, result) → server job result
         self.event = event            # (session_id, event, detail) → server session event
         self.broker_call = broker_call  # privileged RDP enable/disable
         self.server_url = server_url
         self.ca_bundle = ca_bundle
+        self.device_sign = device_sign  # ECDSA signer for the E2E (zero-knowledge relay) handshake
         self.live: dict[str, _Live] = {}
         self._lock = threading.Lock()
 
@@ -231,7 +254,7 @@ class RdpManager:
         token = p.get("tunnel_token", "")
         if token and self.server_url:
             live.tunnel = threading.Thread(target=run_tunnel,
-                                           args=(self.server_url, self.ca_bundle, sid, token, live.stop),
+                                           args=(self.server_url, self.ca_bundle, sid, token, live.stop, self.device_sign),
                                            name=f"rdp-tunnel-{sid[:8]}", daemon=True)
             live.tunnel.start()
         with self._lock:
