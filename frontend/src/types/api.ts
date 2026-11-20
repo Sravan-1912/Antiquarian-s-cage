@@ -327,7 +327,7 @@ export interface DeviceCompliance {
 export interface ComplianceDash { available: true; compliant: number; non_compliant: number; unknown: number; trend: { date: string; average_score: number | null; non_compliant: number }[] }
 export interface PolicyDash { available: true; active_policies: number; total_policies: number; inactive_policies: number; pending: number; by_status: Partial<Record<DeploymentStatus, number>>; success_rate: number | null }
 
-export type RemoteCommand = 'device.inspect' | 'device.lock' | 'device.restart' | 'device.restart_cancel' | 'device.shutdown' | 'device.logoff' | 'account.disable' | 'account.enable' | 'account.remove_admin'
+export type RemoteCommand = 'device.inspect' | 'device.lock' | 'device.restart' | 'device.restart_cancel' | 'device.shutdown' | 'device.logoff' | 'account.disable' | 'account.enable' | 'account.remove_admin' | 'device.isolate' | 'device.release'
 export interface RemoteAction {
   id: string
   device_id: string

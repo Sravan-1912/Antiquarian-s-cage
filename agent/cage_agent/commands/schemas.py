@@ -12,6 +12,7 @@ ROUTE = {
     "device.inspect": "agent", "device.lock": "agent", "device.restart": "broker", "device.restart_cancel": "broker",
     "device.shutdown": "broker", "device.logoff": "broker",
     "account.disable": "broker", "account.enable": "broker", "account.remove_admin": "broker",
+    "device.isolate": "broker", "device.release": "broker",
     "assist.start": "agent", "assist.end": "agent",
     "rdp.start": "agent", "rdp.end": "agent",
     "shell.start": "agent", "shell.end": "agent",
@@ -38,8 +39,11 @@ def validate_command_params(command: str, p) -> dict:
         raise ValueError("parameters must be an object")
     for k in COMMON & set(p):
         _str(p, k, 500)
-    if command in ("device.inspect", "device.lock", "device.restart_cancel", "device.logoff"):
+    if command in ("device.inspect", "device.lock", "device.restart_cancel", "device.logoff", "device.release"):
         _keys(p, set())
+    elif command == "device.isolate":
+        _keys(p, {"server_host"})
+        _str(p, "server_host", 255)  # backend host to keep reachable so the endpoint can be released
     elif command in ("device.restart", "device.shutdown"):
         _keys(p, {"delay_seconds", "message"})
         d = p.get("delay_seconds")

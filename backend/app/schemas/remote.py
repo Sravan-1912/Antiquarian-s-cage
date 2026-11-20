@@ -40,13 +40,17 @@ ACTION_SCHEMAS: dict[str, type[_P]] = {
     "device.inspect": NoParams, "device.lock": NoParams, "device.restart": RestartParams,
     "device.restart_cancel": NoParams, "device.shutdown": RestartParams, "device.logoff": NoParams,
     "account.disable": AccountParams, "account.enable": AccountParams, "account.remove_admin": AccountParams,
+    # Network isolation (killswitch): server_host is injected server-side so the broker keeps the agent→backend
+    # channel open (otherwise the endpoint could never be released).
+    "device.isolate": NoParams, "device.release": NoParams,
 }
 # Actions that change the device's availability or accounts need the operator to re-enter their password.
 SENSITIVE = {"device.restart", "device.shutdown", "device.logoff", "account.disable", "account.enable",
-             "account.remove_admin"}
+             "account.remove_admin", "device.isolate", "device.release"}
 
 ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.restart_cancel", "device.shutdown",
-                     "device.logoff", "account.disable", "account.enable", "account.remove_admin"]
+                     "device.logoff", "account.disable", "account.enable", "account.remove_admin",
+                     "device.isolate", "device.release"]
 
 
 class StepUp(BaseModel):

@@ -18,6 +18,7 @@ PERMISSIONS: dict[str, str] = {
     "devices:remote": "Initiate authorised remote operations",
     "devices:shell": "Open an interactive live-response shell on an endpoint (runs as the logged-in user)",
     "devices:shell_elevated": "Open a live-response shell elevated (SYSTEM/root) on an endpoint",
+    "devices:isolate": "Network-isolate (contain) an endpoint and release it again",
     "policies:read": "View security policies",
     "policies:write": "Create, modify, assign and revoke security policies",
     "compliance:read": "View compliance posture",
@@ -47,7 +48,7 @@ ROLES: dict[str, dict] = {
         "description": "Manages employees, endpoints, policies and application access.",
         "permissions": {
             "dashboard:read", "users:read", "employees:read", "employees:write", "employees:lifecycle",
-            "devices:read", "devices:manage", "devices:remote", "devices:shell", "policies:read", "policies:write",
+            "devices:read", "devices:manage", "devices:remote", "devices:shell", "devices:isolate", "policies:read", "policies:write",
             "compliance:read", "alerts:read", "applications:read", "applications:manage",
             "reports:read", "reports:export", "self:read",
         },

@@ -42,6 +42,12 @@ def create_action(db: Session, device: Device, command: str, parameters: dict, r
     if device.status != "active":
         raise PolicyError(f"Endpoint is {device.status}; remote actions require an active endpoint", 409)
     params = ACTION_SCHEMAS[command].model_validate(parameters).model_dump()
+    if command == "device.isolate":
+        # Inject the backend host so the broker keeps the agent→backend channel open during isolation (otherwise the
+        # endpoint could never receive the release command). Signed into the envelope, so the agent cannot alter it.
+        from urllib.parse import urlparse
+        from app.core.config import get_settings
+        params["server_host"] = (urlparse(get_settings().public_base_url).hostname or "")[:255]
     job = policies.create_job(db, device, command, {**params, "reason": reason, "requested_by": actor.label}, actor,
                               idempotency_key=f"action:{device.id}:{command}:{uuid.uuid4().hex}")
     audit.record(db, device.organization_id, actor, f"remote.{command}", target_type="device", target_id=device.id,

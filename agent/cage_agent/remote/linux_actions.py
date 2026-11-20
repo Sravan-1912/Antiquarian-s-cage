@@ -324,9 +324,55 @@ def rdp_disable(_: dict) -> Outcome:
     return Outcome("succeeded", "Remote Desktop (xrdp) disabled", {"rdp_enabled": True}, {"rdp_enabled": False})
 
 
+_ISO_CHAIN = "CAGE_ISO"
+
+
+def isolate(p: dict) -> Outcome:
+    """Network-isolate the endpoint (root): block OUTBOUND traffic except the agent→backend channel (so it can still be
+    released), DNS/DHCP, loopback and established connections. Reversible via release(). Uses an iptables chain."""
+    host = str(p.get("server_host") or "").strip()
+    ips: set[str] = set()
+    if host:
+        import socket
+        try:
+            ips = {ai[4][0] for ai in socket.getaddrinfo(host, None)}
+        except OSError:
+            ips = set()
+    if host and not ips:
+        return Outcome("failed", f"Could not resolve the backend host ({host}); not isolating (would cut off management).",
+                       {"isolated": False}, {"isolated": False})
+    if not shutil.which("iptables"):
+        return Outcome("needs_attention", "iptables not available; cannot network-isolate this endpoint.",
+                       {"isolated": False}, {"isolated": False})
+    _run(["iptables", "-N", _ISO_CHAIN], timeout=10)  # may already exist
+    _run(["iptables", "-F", _ISO_CHAIN], timeout=10)
+    rules = [["-o", "lo", "-j", "ACCEPT"],
+             ["-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"],
+             *[["-d", ip, "-j", "ACCEPT"] for ip in sorted(ips)],
+             ["-p", "udp", "--dport", "53", "-j", "ACCEPT"], ["-p", "tcp", "--dport", "53", "-j", "ACCEPT"],
+             ["-p", "udp", "--dport", "67:68", "-j", "ACCEPT"], ["-j", "DROP"]]
+    for r in rules:
+        _run(["iptables", "-A", _ISO_CHAIN, *r], timeout=10)
+    _run(["iptables", "-C", "OUTPUT", "-j", _ISO_CHAIN], timeout=10)  # idempotent insert
+    _run(["iptables", "-I", "OUTPUT", "1", "-j", _ISO_CHAIN], timeout=10)
+    return Outcome("succeeded", f"Endpoint isolated — outbound locked to the management channel ({host or 'backend'})",
+                   {"isolated": False}, {"isolated": True, "allowed_ips": sorted(ips)})
+
+
+def release(_: dict) -> Outcome:
+    """Lift network isolation (root): remove the iptables jump and chain."""
+    for _ in range(4):  # remove any duplicate jumps
+        if _run(["iptables", "-D", "OUTPUT", "-j", _ISO_CHAIN], timeout=10).returncode != 0:
+            break
+    _run(["iptables", "-F", _ISO_CHAIN], timeout=10)
+    _run(["iptables", "-X", _ISO_CHAIN], timeout=10)
+    return Outcome("succeeded", "Endpoint released from isolation", {"isolated": True}, {"isolated": False})
+
+
 HANDLERS = {
     "device.inspect": inspect, "device.lock": lock, "device.restart": restart, "device.restart_cancel": restart_cancel,
     "device.shutdown": shutdown, "device.logoff": logoff,
     "account.disable": account_disable, "account.enable": account_enable, "account.remove_admin": account_remove_admin,
+    "device.isolate": isolate, "device.release": release,
     "assist.end": close_quick_assist, "rdp.start": rdp_enable, "rdp.end": rdp_disable,
 }

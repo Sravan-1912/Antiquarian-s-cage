@@ -56,6 +56,8 @@ def _session_out(db: Session, x: RemoteSession) -> s.SessionOut:
 def create_action(device_id: uuid.UUID, body: s.ActionRequest, ctx: AuthContext = Depends(REMOTE),
                   db: Session = Depends(get_db)):
     device = get_device(db, ctx, device_id)
+    if body.command in ("device.isolate", "device.release") and "devices:isolate" not in ctx.permissions:
+        raise HTTPException(403, "Network isolation requires the devices:isolate permission")
     if body.command in s.SENSITIVE:
         _reauth(db, ctx, body.step_up, body.command)
     try:

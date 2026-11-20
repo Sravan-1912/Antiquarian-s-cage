@@ -27,6 +27,7 @@ COMMAND_TTL_MINUTES: dict[str, int | None] = {
     "policy.apply": None, "policy.remove": None,           # None → COMMAND_JOB_TTL_HOURS
     "device.inspect": 10, "device.lock": 10, "device.restart": 30, "device.restart_cancel": 30,
     "account.disable": 60, "account.enable": 60, "account.remove_admin": 60,
+    "device.isolate": 30, "device.release": 30,
     "assist.start": 10, "assist.end": 30,
     "rdp.start": 10, "rdp.end": 30,
     "shell.start": 10, "shell.end": 30,

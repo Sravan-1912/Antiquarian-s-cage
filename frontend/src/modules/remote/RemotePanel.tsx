@@ -14,9 +14,9 @@ const LABEL: Record<string, string> = {
   'device.inspect': 'Status inspection', 'device.lock': 'Remote lock', 'device.restart': 'Remote restart',
   'device.restart_cancel': 'Cancel restart', 'device.shutdown': 'Power off', 'device.logoff': 'Log off user',
   'account.disable': 'Disable local account', 'account.enable': 'Enable local account',
-  'account.remove_admin': 'Remove from Administrators',
+  'account.remove_admin': 'Remove from Administrators', 'device.isolate': 'Network isolate', 'device.release': 'Release isolation',
 }
-const SENSITIVE = new Set<RemoteCommand>(['device.restart', 'device.shutdown', 'device.logoff', 'account.disable', 'account.enable', 'account.remove_admin'])
+const SENSITIVE = new Set<RemoteCommand>(['device.restart', 'device.shutdown', 'device.logoff', 'account.disable', 'account.enable', 'account.remove_admin', 'device.isolate', 'device.release'])
 const WITH_DELAY = new Set<RemoteCommand>(['device.restart', 'device.shutdown'])
 
 type Pending = { command: RemoteCommand; parameters: Record<string, unknown>; title: string; description: string; danger?: boolean; extra?: ReactNode }
@@ -39,6 +39,7 @@ export function RemotePanel({ device }: { device: Device }) {
   const remote = can('devices:remote')
   const canShell = can('devices:shell')
   const canShellElevated = can('devices:shell_elevated')
+  const canIsolate = can('devices:isolate')
   const [pending, setPending] = useState<Pending | null>(null)
   const [reason, setReason] = useState('')
   const [stepPw, setStepPw] = useState('')
@@ -98,6 +99,10 @@ export function RemotePanel({ device }: { device: Device }) {
   const admins = new Set((st.administrators ?? []).map((a) => a.name.split('\\').pop()!.toLowerCase()))
   const open = sessions.data?.find((x) => !['ended', 'denied', 'expired', 'cancelled', 'failed'].includes(x.status))
   const active = device.status === 'active'
+  // Isolation state derived from history (newest-first): isolated if the latest isolate is newer than any release.
+  const lastIso = actions.data?.find((a) => a.command === 'device.isolate' && a.status === 'succeeded')
+  const lastRel = actions.data?.find((a) => a.command === 'device.release' && a.status === 'succeeded')
+  const isolated = !!lastIso && (!lastRel || new Date(lastIso.issued_at) > new Date(lastRel.issued_at))
 
   function ask(command: RemoteCommand, parameters: Record<string, unknown>, title: string, description: string, danger = false) {
     act.reset()
@@ -128,6 +133,7 @@ export function RemotePanel({ device }: { device: Device }) {
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         <Card>
           <CardHeader title="Remote administration" description="Allowlisted, signed, short-lived commands. Every action needs a reason and is audited." />
+          {isolated && <div className="mx-4 mt-3"><Alert tone="danger"><ShieldOff className="mr-1.5 inline size-4" /><b>Network isolated</b> — this endpoint is contained; only the management channel is allowed.</Alert></div>}
           {!remote ? <p className="px-4 py-3 text-sm text-silver-500">Your role cannot perform remote actions.</p> : !active ? <p className="px-4 py-3 text-sm text-silver-500">Endpoint is {device.status}; remote actions are disabled.</p> : (
             <div className="flex flex-wrap gap-2 p-4">
               <Button size="sm" variant="outline" onClick={() => ask('device.inspect', {}, 'Inspect live status', 'Collects uptime, load, signed-in users and local accounts (read-only).')}><Activity />Inspect status</Button>
@@ -139,6 +145,9 @@ export function RemotePanel({ device }: { device: Device }) {
               <Button size="sm" onClick={() => { assist.reset(); setAssistOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Headset />Remote assistance</Button>
               <Button size="sm" onClick={() => { rdp.reset(); setRdpOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Monitor />Remote desktop</Button>
               {canShell && <Button size="sm" variant="outline" onClick={() => { shell.reset(); setShellOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Terminal />Live-response shell</Button>}
+              {canIsolate && (isolated
+                ? <Button size="sm" variant="primary" onClick={() => ask('device.release', {}, 'Release from isolation', 'Restores normal network access on the endpoint and removes the containment firewall rules.')}><ShieldOff />Release isolation</Button>
+                : <Button size="sm" variant="danger" onClick={() => ask('device.isolate', {}, 'Network-isolate the endpoint', 'Contains the endpoint: blocks all traffic except the management channel so you can still release it. Use for a suspected compromise.', true)} disabled={!device.online} title={!device.online ? 'Endpoint offline' : undefined}><ShieldOff />Isolate</Button>)}
             </div>
           )}
           <div className="border-t border-ink-700 px-4 py-3">

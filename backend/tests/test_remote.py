@@ -169,6 +169,21 @@ def test_shell_session_lifecycle_and_elevated_flag(client, outbox):
     assert "remote.shell_requested" in acts
 
 
+def test_isolate_and_release_contain_endpoint(client, outbox):
+    agent = _setup(client, outbox)
+    R = "root@example.com"
+    # Network isolation is sensitive (password step-up) and gated by devices:isolate (root/super_admin has it).
+    assert _act(client, agent, "device.isolate").status_code == 403  # no step-up
+    assert _act(client, agent, "device.isolate", step=step_up(client, R)).status_code == 201
+    env = _next_job(agent)
+    assert env["command"] == "device.isolate"
+    # server_host is injected server-side so the broker keeps the agent→backend channel open (releasable).
+    assert env["parameters"]["server_host"]
+    agent.signed(f"/agent/v1/jobs/{env['job_id']}/result", {"status": "succeeded", "current_state": {"isolated": True}})
+    assert _act(client, agent, "device.release", step=step_up(client, R)).status_code == 201
+    assert _next_job(agent)["command"] == "device.release"
+
+
 def test_rdp_relay_pipes_bytes_and_rejects_bad_token(client, outbox):
     from app.services.rdp_relay import mint_token
     sid = "11111111-1111-1111-1111-111111111111"

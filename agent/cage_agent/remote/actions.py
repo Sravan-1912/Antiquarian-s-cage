@@ -284,10 +284,55 @@ def rdp_disable(_: dict) -> Outcome:
     return Outcome("succeeded", "Remote Desktop disabled", {"rdp_enabled": True}, {"rdp_enabled": False})
 
 
+_ISO_RULES = ("CageIsolation-Backend", "CageIsolation-DNS", "CageIsolation-DNS-TCP", "CageIsolation-DHCP")
+
+
+def isolate(p: dict) -> Outcome:
+    """Broker-only: network-isolate (contain) the endpoint — block all traffic EXCEPT the agent→backend management
+    channel (so the endpoint can still be released) + DNS/DHCP. Reversible with release()."""
+    host = str(p.get("server_host") or "").strip()
+    ips: set[str] = set()
+    if host:
+        import socket
+        try:
+            ips = {ai[4][0] for ai in socket.getaddrinfo(host, None)}
+        except OSError:
+            ips = set()
+    if host and not ips:
+        # Refuse rather than cut the endpoint off from the only channel that can release it.
+        return Outcome("failed", f"Could not resolve the backend host ({host}); not isolating (would cut off management).",
+                       {"isolated": False}, {"isolated": False})
+    subprocess.run([exe("netsh.exe"), "advfirewall", "set", "allprofiles", "firewallpolicy",
+                    "blockinbound,blockoutbound"], capture_output=True, creationflags=NO_WINDOW, check=True)
+
+    def allow(name: str, *args: str) -> None:
+        subprocess.run([exe("netsh.exe"), "advfirewall", "firewall", "add", "rule", f"name={name}",
+                        "dir=out", "action=allow", *args], capture_output=True, creationflags=NO_WINDOW)
+
+    if ips:
+        allow("CageIsolation-Backend", f"remoteip={','.join(sorted(ips))}")
+    allow("CageIsolation-DNS", "protocol=UDP", "remoteport=53")
+    allow("CageIsolation-DNS-TCP", "protocol=TCP", "remoteport=53")
+    allow("CageIsolation-DHCP", "protocol=UDP", "remoteport=67-68")
+    return Outcome("succeeded", f"Endpoint isolated — network locked to the management channel ({host or 'backend'})",
+                   {"isolated": False}, {"isolated": True, "allowed_ips": sorted(ips)})
+
+
+def release(_: dict) -> Outcome:
+    """Broker-only: lift network isolation — restore the default firewall policy and remove the isolation allow-rules."""
+    subprocess.run([exe("netsh.exe"), "advfirewall", "set", "allprofiles", "firewallpolicy",
+                    "blockinbound,allowoutbound"], capture_output=True, creationflags=NO_WINDOW, check=True)
+    for name in _ISO_RULES:
+        subprocess.run([exe("netsh.exe"), "advfirewall", "firewall", "delete", "rule", f"name={name}"],
+                       capture_output=True, creationflags=NO_WINDOW)
+    return Outcome("succeeded", "Endpoint released from isolation", {"isolated": True}, {"isolated": False})
+
+
 HANDLERS = {
     "device.inspect": inspect, "device.lock": lock, "device.restart": restart, "device.restart_cancel": restart_cancel,
     "device.shutdown": shutdown, "device.logoff": logoff,
     "account.disable": account_disable, "account.enable": account_enable, "account.remove_admin": account_remove_admin,
+    "device.isolate": isolate, "device.release": release,
     "assist.end": close_quick_assist, "rdp.start": rdp_enable, "rdp.end": rdp_disable,
 }
 
