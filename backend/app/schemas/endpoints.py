@@ -107,6 +107,25 @@ class SecurityCheck(_Strict):
     data: dict[str, str | int | bool | None] = Field(default_factory=dict, max_length=32)
 
 
+class TelemetryEvent(_Strict):
+    type: Annotated[str, StringConstraints(max_length=48, pattern=r"^[a-z_]+$")]
+    ts: datetime | None = None
+    data: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("data")
+    @classmethod
+    def _bound(cls, v: dict) -> dict:
+        # Bound each event so a compromised agent cannot flood the detection engine.
+        if len(v) > 24 or len(str(v)) > 4000:
+            raise ValueError("event payload too large")
+        return v
+
+
+class TelemetryRequest(_Strict):
+    """A batch of endpoint telemetry events (process creation, etc.) for the EDR detection engine."""
+    events: list[TelemetryEvent] = Field(default_factory=list, max_length=200)
+
+
 class InventoryRequest(_Strict):
     agent_version: Tiny
     collected_at: datetime | None = None

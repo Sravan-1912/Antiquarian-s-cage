@@ -40,6 +40,7 @@ RULES: dict[str, dict] = {
     "deployment_failures": {"name": "Repeated policy deployment failures", "kind": "operational"},
     "admin_activity_burst": {"name": "Unusual administrative activity", "kind": "suspicious_activity"},
     "authz_denied_burst": {"name": "Repeated permission denials", "kind": "suspicious_activity"},
+    "edr_detection": {"name": "Endpoint threat detection", "kind": "suspicious_activity"},  # EDR telemetry rule match
     "remote_access_anomaly": {"name": "Suspicious remote access activity", "kind": "suspicious_activity"},
     "audit_integrity": {"name": "Audit log integrity check failed", "kind": "suspicious_activity"},
     "phone_approval_refused": {"name": "Sign-in approval refused on phone", "kind": "suspicious_activity"},

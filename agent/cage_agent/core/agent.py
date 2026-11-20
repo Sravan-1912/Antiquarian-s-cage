@@ -88,6 +88,7 @@ class Agent:
         self.key = identity.load_key(paths)
         self.client = AgentClient(self.cfg)
         self.next_inventory = 0.0
+        self._telemetry = None  # lazily-created EDR process-telemetry collector
         self.server_status = "unknown"
         from cage_agent.commands.executor import JobExecutor
         self.executor = JobExecutor(paths.root, self.cfg, lambda: configuration.save(self.paths, self.cfg))
@@ -138,6 +139,19 @@ class Agent:
         self.client.inventory(self.key, data)
         log.info("inventory uploaded")
 
+    def telemetry_once(self) -> None:
+        """Collect newly-created-process telemetry and stream it for server-side EDR detection (best-effort)."""
+        if self._telemetry is None:
+            from cage_agent.collectors.telemetry import ProcessTelemetry
+            self._telemetry = ProcessTelemetry()
+        try:
+            events = self._telemetry.collect()
+        except Exception as exc:  # noqa: BLE001 - telemetry is best-effort; never take the agent down
+            log.debug("telemetry collection skipped: %s", exc)
+            return
+        if events:
+            self.client.telemetry(self.key, {"events": events})
+
     def renew_certificate(self) -> None:
         new_key = identity.generate_key()
         resp = self.client.renew(self.key, {"csr_pem": identity.make_csr(new_key, socket.gethostname())})
@@ -163,6 +177,8 @@ class Agent:
                     failures = 0
                     if hb.get("jobs_pending") and self.server_status == "active":
                         self.jobs_once()
+                    if self.server_status == "active":
+                        self.telemetry_once()  # stream new-process telemetry every tick (cheap)
                     if self.server_status == "active" and time.monotonic() >= self.next_inventory:
                         self.inventory_once()
                         self.next_inventory = time.monotonic() + self.cfg.inventory_interval_seconds

@@ -171,6 +171,21 @@ def test_indefinite_enrollment_token_never_expires(client, outbox):
     assert FakeAgent(client).enroll(tok["token"]).status_code == 201
 
 
+def test_telemetry_stream_raises_edr_alert(client, outbox):
+    _admin(client, outbox)
+    agent = FakeAgent(client)
+    agent.enroll(_token(client)["token"])
+    # A malicious-looking process event + a benign one: only the malicious one becomes an alert.
+    r = agent.signed("/agent/v1/telemetry", {"events": [
+        {"type": "process_created", "data": {"name": "powershell.exe",
+         "cmdline": "powershell -nop -EncodedCommand ZQBjAGgAbwAgAHgAeAB4AHgAeAA="}},
+        {"type": "process_created", "data": {"name": "notepad.exe", "cmdline": "notepad.exe a.txt"}}]})
+    assert r.status_code == 202 and r.json()["matched"] == 1
+    edr = [a for a in client.get("/api/v1/alerts", params={"status": "open"}).json()["items"]
+           if a["rule_key"] == "edr_detection"]
+    assert edr and edr[0]["severity"] == "high"
+
+
 def test_lifecycle_suspend_revoke_unenroll(client, outbox):
     _admin(client, outbox)
     agent = FakeAgent(client)

@@ -119,6 +119,16 @@ def inventory(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get
     return {"accepted": True}
 
 
+@router.post("/telemetry", status_code=202)
+def telemetry(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Stream endpoint telemetry (process creation, etc.) for the EDR detection engine. Events are evaluated against
+    the detection rules and discarded; only matches become alerts. Agent-signed like every other agent request."""
+    from app.services import detections
+    req = _parse(s.TelemetryRequest, ctx.body)
+    matched = detections.ingest(db, ctx.device, [e.model_dump() for e in req.events])
+    return {"accepted": True, "matched": matched}
+
+
 @router.post("/certificate/renew", response_model=s.RenewResponse)
 def renew(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
     req = _parse(s.RenewRequest, ctx.body)
