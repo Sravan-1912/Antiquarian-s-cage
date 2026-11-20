@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as DM from '@radix-ui/react-dropdown-menu'
 import {
-  AppWindow, Bell, Briefcase, FileBarChart, ShieldAlert, ChevronDown, ClipboardCheck, FileLock2, Headset, LaptopMinimal, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck, UserCog, Users, X,
+  AppWindow, Bell, Briefcase, FileBarChart, ShieldAlert, ChevronDown, ClipboardCheck, FileLock2, Headset, LaptopMinimal, LayoutDashboard, LogOut, Menu, Palette, ScrollText, Search, ShieldCheck, UserCog, Users, X,
 } from 'lucide-react'
 import { Wordmark } from '@/components/Logo'
 import { Badge, Spinner } from '@/components/ui/primitives'
@@ -48,7 +48,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
       { to: '/reports', label: 'Reports', icon: FileBarChart, perm: 'reports:read' },
     ],
   },
-  { section: 'Account', items: [{ to: '/account/security', label: 'Security settings', icon: ShieldCheck }] },
+  { section: 'Account', items: [{ to: '/account/security', label: 'Security settings', icon: ShieldCheck }, { to: '/themes', label: 'Themes', icon: Palette }] },
 ]
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -239,6 +239,7 @@ export function AppShell() {
           <button className="rounded p-1.5 text-silver-400 hover:bg-ink-800 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu className="size-5" /></button>
           <GlobalSearch />
           <div className="ml-auto flex items-center gap-1">
+            <Link to="/themes" className="rounded-md p-1.5 text-silver-400 hover:bg-ink-800 hover:text-silver-100" aria-label="Themes" title="Themes"><Palette className="size-4" /></Link>
             <NotificationCenter />
             <div className="mx-1 h-6 w-px bg-ink-700" />
             <ProfileMenu />

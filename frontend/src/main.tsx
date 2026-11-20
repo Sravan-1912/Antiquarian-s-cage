@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
+import './theme/themes.css'  // after index.css so [data-theme] overrides win in the cascade
+import { ThemeProvider } from '@/theme/ThemeContext'
+import { ThemesPage } from '@/modules/settings/ThemesPage'
 import { AuthProvider, useAuth } from '@/hooks/useAuth'
 import { AppShell } from '@/layouts/AppShell'
 import { Spinner } from '@/components/ui/primitives'
@@ -76,6 +79,7 @@ function NotFound() {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
           <Routes>
@@ -103,11 +107,13 @@ createRoot(document.getElementById('root')!).render(
               <Route path="audit" element={<Gate perm="audit:read"><AuditPage /></Gate>} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="account/security" element={<AccountSecurityPage />} />
+              <Route path="themes" element={<ThemesPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
         </AuthProvider>
       </BrowserRouter>
+      </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

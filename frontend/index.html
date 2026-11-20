@@ -6,6 +6,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Antiquarian's Cage</title>
+    <script>
+      // Apply the saved theme before first paint (zero flash).
+      (function () {
+        try {
+          var t = localStorage.getItem('cage-theme') || 'liquid-glass';
+          document.documentElement.dataset.theme = t;
+          var wp = JSON.parse(localStorage.getItem('cage-wallpaper-cfg') || '{}');
+          var s = document.documentElement.style;
+          if (wp.blur) s.setProperty('--cage-wallpaper-blur', wp.blur + 'px');
+          if (wp.tint != null) s.setProperty('--cage-glass-tint', 'rgba(18,19,22,' + wp.tint + ')');
+          if (wp.dim != null) s.setProperty('--cage-wallpaper-dim', String(wp.dim));
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,0 +1,203 @@
+/* Theme engine — 15 single-click themes. Each overrides the semantic surface tokens (--color-ink-* = surfaces,
+   --color-silver-* = foreground/text) that every Tailwind `bg-ink-*` / `text-silver-*` utility already references, so
+   switching data-theme on <html> re-themes the whole console instantly. Status hues (emerald/red/amber/sky) are left
+   intact to preserve green=success / red=danger / amber=warning semantics; --cage-accent carries each theme's accent. */
+
+:root {
+  --cage-accent: #34d399;
+  --cage-wallpaper: none;
+  --cage-wallpaper-blur: 24px;
+  --cage-glass-tint: rgba(18, 19, 22, 0.55);
+  --cage-wallpaper-dim: 0.35;
+}
+
+/* Smooth cross-fade fallback where View Transitions aren't available. */
+html { transition: none; }
+*:focus-visible { outline: 2px solid var(--cage-accent); outline-offset: 1px; }
+::selection { background: color-mix(in srgb, var(--cage-accent) 38%, transparent); color: #fff; }
+
+/* View Transitions: radial reveal from the clicked point. */
+::view-transition-old(root) { animation: none; }
+::view-transition-new(root) { animation: cage-reveal 480ms cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes cage-reveal { from { clip-path: circle(0% at var(--cage-x, 50%) var(--cage-y, 50%)); }
+                         to   { clip-path: circle(150% at var(--cage-x, 50%) var(--cage-y, 50%)); } }
+@media (prefers-reduced-motion: reduce) { ::view-transition-new(root) { animation: none; } }
+
+@keyframes cage-mesh { 0% { background-position: 0% 0%, 100% 0%, 50% 100%; }
+                       50% { background-position: 40% 20%, 60% 40%, 40% 70%; }
+                       100% { background-position: 0% 0%, 100% 0%, 50% 100%; } }
+
+/* ============================================================== 1. Liquid Glass (default) */
+[data-theme="liquid-glass"] {
+  --color-ink-950: rgba(10,12,20,0.72); --color-ink-900: rgba(20,24,38,0.55); --color-ink-850: rgba(24,28,44,0.45);
+  --color-ink-800: rgba(32,38,58,0.5); --color-ink-700: rgba(120,140,190,0.22); --color-ink-600: rgba(150,170,210,0.3);
+  --color-ink-500: rgba(170,190,230,0.4);
+  --color-silver-50: #f3f6fe; --color-silver-100: #e6ebf8; --color-silver-200: #d2daf0; --color-silver-400: #9fb0d6;
+  --color-silver-500: #8294bf; --color-silver-600: #6b7ca6; --cage-accent: #7aa2ff;
+}
+[data-theme="liquid-glass"] body, [data-theme="crimson-glass"] body, [data-theme="custom-wallpaper"] body {
+  background-attachment: fixed;
+}
+[data-theme="liquid-glass"] body {
+  background:
+    radial-gradient(60% 60% at 15% 10%, rgba(99,102,241,0.35), transparent 60%),
+    radial-gradient(50% 50% at 85% 20%, rgba(14,165,233,0.3), transparent 60%),
+    radial-gradient(60% 60% at 50% 100%, rgba(168,85,247,0.28), transparent 60%), #0a0d16;
+  background-size: 180% 180%, 160% 160%, 200% 200%; animation: cage-mesh 24s ease-in-out infinite;
+}
+/* Frosted surfaces for the glass family. */
+[data-theme="liquid-glass"] .bg-ink-900, [data-theme="liquid-glass"] .bg-ink-850, [data-theme="liquid-glass"] .bg-ink-800,
+[data-theme="crimson-glass"] .bg-ink-900, [data-theme="crimson-glass"] .bg-ink-850, [data-theme="crimson-glass"] .bg-ink-800,
+[data-theme="custom-wallpaper"] .bg-ink-900, [data-theme="custom-wallpaper"] .bg-ink-850, [data-theme="custom-wallpaper"] .bg-ink-800 {
+  backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.18), 0 10px 40px -12px rgba(0,0,0,0.5);
+}
+
+/* ============================================================== 2. Liquid Glass — Custom Wallpaper */
+[data-theme="custom-wallpaper"] {
+  --color-ink-950: rgba(10,12,20,0.72); --color-ink-900: var(--cage-glass-tint); --color-ink-850: var(--cage-glass-tint);
+  --color-ink-800: var(--cage-glass-tint); --color-ink-700: rgba(200,210,230,0.22); --color-ink-600: rgba(210,220,240,0.3);
+  --color-ink-500: rgba(220,230,250,0.4);
+  --color-silver-50: #ffffff; --color-silver-100: #eef1f8; --color-silver-200: #dbe2f0; --color-silver-400: #b7c2dc;
+  --color-silver-500: #9aa6c4; --color-silver-600: #808cab; --cage-accent: #8ab4ff;
+}
+[data-theme="custom-wallpaper"] body {
+  background: linear-gradient(rgba(0,0,0,var(--cage-wallpaper-dim)), rgba(0,0,0,var(--cage-wallpaper-dim))), var(--cage-wallpaper);
+  background-size: cover; background-position: center;
+}
+[data-theme="custom-wallpaper"] .bg-ink-900, [data-theme="custom-wallpaper"] .bg-ink-850, [data-theme="custom-wallpaper"] .bg-ink-800 {
+  backdrop-filter: blur(var(--cage-wallpaper-blur)) saturate(170%); -webkit-backdrop-filter: blur(var(--cage-wallpaper-blur)) saturate(170%);
+}
+
+/* ============================================================== 3. Antiquarian Obsidian (OLED) */
+[data-theme="obsidian"] {
+  --color-ink-950: #000000; --color-ink-900: #050506; --color-ink-850: #09090b; --color-ink-800: #0e0e11;
+  --color-ink-700: #1c1c20; --color-ink-600: #27272a; --color-ink-500: #3a3a40;
+  --color-silver-50: #ffffff; --color-silver-100: #f4f4f5; --color-silver-200: #e4e4e7; --color-silver-400: #a1a1aa;
+  --color-silver-500: #71717a; --color-silver-600: #52525b; --cage-accent: #f5c87a;
+}
+
+/* ============================================================== 4. Tokyo Night */
+[data-theme="tokyo-night"] {
+  --color-ink-950: #16161e; --color-ink-900: #1a1b26; --color-ink-850: #1f2130; --color-ink-800: #24283b;
+  --color-ink-700: #2f3450; --color-ink-600: #3b4261; --color-ink-500: #545c7e;
+  --color-silver-50: #ffffff; --color-silver-100: #e7eafc; --color-silver-200: #c0caf5; --color-silver-400: #9aa5ce;
+  --color-silver-500: #7a85b5; --color-silver-600: #565f89; --cage-accent: #7dcfff;
+}
+
+/* ============================================================== 5. Catppuccin Mocha */
+[data-theme="catppuccin-mocha"] {
+  --color-ink-950: #181825; --color-ink-900: #1e1e2e; --color-ink-850: #242436; --color-ink-800: #313244;
+  --color-ink-700: #3e3f52; --color-ink-600: #494b63; --color-ink-500: #5b5e7a;
+  --color-silver-50: #ffffff; --color-silver-100: #eff1f5; --color-silver-200: #cdd6f4; --color-silver-400: #a6adc8;
+  --color-silver-500: #8087a2; --color-silver-600: #6c7086; --cage-accent: #cba6f7;
+}
+
+/* ============================================================== 6. Cyberpunk Neon Noir */
+[data-theme="cyberpunk"] {
+  --color-ink-950: #06040c; --color-ink-900: #0b0716; --color-ink-850: #100a20; --color-ink-800: #160e2c;
+  --color-ink-700: #2a1850; --color-ink-600: #3a1f6e; --color-ink-500: #52308f;
+  --color-silver-50: #ffffff; --color-silver-100: #f2e9ff; --color-silver-200: #e0d3ff; --color-silver-400: #b49ae6;
+  --color-silver-500: #8f74c4; --color-silver-600: #6e58a0; --cage-accent: #00f0ff;
+}
+[data-theme="cyberpunk"] body {
+  background:
+    linear-gradient(rgba(5,2,10,0.92), rgba(5,2,10,0.92)),
+    repeating-linear-gradient(0deg, rgba(0,240,255,0.05) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255,0,124,0.05) 0 1px, transparent 1px 3px), #06040c;
+}
+[data-theme="cyberpunk"] .bg-ink-900, [data-theme="cyberpunk"] .bg-ink-850 { box-shadow: 0 0 0 1px rgba(0,240,255,0.14), 0 0 24px -6px rgba(255,0,124,0.3); }
+
+/* ============================================================== 7. Nordic Frost */
+[data-theme="nordic"] {
+  --color-ink-950: #272c36; --color-ink-900: #2e3440; --color-ink-850: #343b48; --color-ink-800: #3b4252;
+  --color-ink-700: #434c5e; --color-ink-600: #4c566a; --color-ink-500: #5c6678;
+  --color-silver-50: #ffffff; --color-silver-100: #eceff4; --color-silver-200: #e5e9f0; --color-silver-400: #b8c1d1;
+  --color-silver-500: #96a0b5; --color-silver-600: #7b8699; --cage-accent: #88c0d0;
+}
+
+/* ============================================================== 8. Dracula Pro */
+[data-theme="dracula"] {
+  --color-ink-950: #21222c; --color-ink-900: #282a36; --color-ink-850: #2d2f3d; --color-ink-800: #343746;
+  --color-ink-700: #424458; --color-ink-600: #4d4f68; --color-ink-500: #6272a4;
+  --color-silver-50: #ffffff; --color-silver-100: #f8f8f2; --color-silver-200: #e6e6e0; --color-silver-400: #b9bacc;
+  --color-silver-500: #8f91b0; --color-silver-600: #6d6f8c; --cage-accent: #bd93f9;
+}
+
+/* ============================================================== 9. Gruvbox Warm Dark */
+[data-theme="gruvbox"] {
+  --color-ink-950: #1d2021; --color-ink-900: #282828; --color-ink-850: #32302f; --color-ink-800: #3c3836;
+  --color-ink-700: #504945; --color-ink-600: #665c54; --color-ink-500: #7c6f64;
+  --color-silver-50: #fbf1c7; --color-silver-100: #f2e5bc; --color-silver-200: #ebdbb2; --color-silver-400: #bdae93;
+  --color-silver-500: #a89984; --color-silver-600: #928374; --cage-accent: #fabd2f;
+}
+
+/* ============================================================== 10. Alabaster Daylight (light) */
+[data-theme="alabaster"] {
+  --color-ink-950: #e8eaf0; --color-ink-900: #ffffff; --color-ink-850: #f8f9fb; --color-ink-800: #f1f3f7;
+  --color-ink-700: #e2e5ec; --color-ink-600: #d4d8e2; --color-ink-500: #b9bfcd;
+  --color-silver-50: #0b0f1a; --color-silver-100: #1a2234; --color-silver-200: #2b3346; --color-silver-400: #5a6478;
+  --color-silver-500: #6d7689; --color-silver-600: #8a93a6; --cage-accent: #4f46e5;
+}
+
+/* ====================================================== 11. Velvet Burgundy */
+[data-theme="velvet-burgundy"] {
+  --color-ink-950: #0d0407; --color-ink-900: #140609; --color-ink-850: #1c080e; --color-ink-800: #240b11;
+  --color-ink-700: #3a1620; --color-ink-600: #4e1f2c; --color-ink-500: #6b2c3b;
+  --color-silver-50: #fdf6f2; --color-silver-100: #f7ede8; --color-silver-200: #ecd9d2; --color-silver-400: #cba7a0;
+  --color-silver-500: #a9847d; --color-silver-600: #8a6761; --cage-accent: #d4af7a;
+}
+[data-theme="velvet-burgundy"] body { background: radial-gradient(120% 90% at 50% -10%, #240b11 0%, #0d0407 70%); }
+
+/* ====================================================== 12. Crimson Liquid Glass */
+[data-theme="crimson-glass"] {
+  --color-ink-950: rgba(13,4,7,0.72); --color-ink-900: rgba(38,10,18,0.55); --color-ink-850: rgba(44,12,22,0.46);
+  --color-ink-800: rgba(56,16,28,0.5); --color-ink-700: rgba(255,180,195,0.16); --color-ink-600: rgba(255,180,195,0.26);
+  --color-ink-500: rgba(255,190,205,0.36);
+  --color-silver-50: #fff5f7; --color-silver-100: #ffe9ee; --color-silver-200: #f6d3da; --color-silver-400: #d6a2ac;
+  --color-silver-500: #b47f8a; --color-silver-600: #96636e; --cage-accent: #fb7185;
+}
+[data-theme="crimson-glass"] body {
+  background:
+    radial-gradient(60% 60% at 20% 10%, rgba(225,29,72,0.4), transparent 60%),
+    radial-gradient(55% 55% at 85% 25%, rgba(136,19,55,0.5), transparent 60%),
+    radial-gradient(60% 60% at 50% 100%, rgba(61,10,22,0.6), transparent 60%), #0d0407;
+  background-size: 180% 180%, 160% 160%, 200% 200%; animation: cage-mesh 26s ease-in-out infinite;
+}
+[data-theme="crimson-glass"] .bg-ink-900, [data-theme="crimson-glass"] .bg-ink-850 { box-shadow: inset 1px 1px 0 rgba(255,180,195,0.22), 0 10px 40px -12px rgba(136,19,55,0.5); }
+
+/* ====================================================== 13. Cabernet Noir */
+[data-theme="cabernet-noir"] {
+  --color-ink-950: #0c0910; --color-ink-900: #120e14; --color-ink-850: #180f16; --color-ink-800: #1f131a;
+  --color-ink-700: #301a24; --color-ink-600: #3a202b; --color-ink-500: #512c3a;
+  --color-silver-50: #fbf3f4; --color-silver-100: #f3e3e5; --color-silver-200: #e3c9cd; --color-silver-400: #d8b7b3;
+  --color-silver-500: #ab888c; --color-silver-600: #8a6a6f; --cage-accent: #a32938;
+}
+
+/* ====================================================== 14. Scarlet Ops */
+[data-theme="scarlet-ops"] {
+  --color-ink-950: #050507; --color-ink-900: #08080a; --color-ink-850: #0e0e11; --color-ink-800: #121216;
+  --color-ink-700: #1e1e24; --color-ink-600: #2a2a32; --color-ink-500: #3d3d47;
+  --color-silver-50: #ffffff; --color-silver-100: #f4f4f6; --color-silver-200: #e3e3e8; --color-silver-400: #a4a4b0;
+  --color-silver-500: #76767f; --color-silver-600: #55555e; --cage-accent: #ef233c;
+}
+[data-theme="scarlet-ops"] body {
+  background: linear-gradient(rgba(8,8,10,0.96), rgba(8,8,10,0.96)),
+    radial-gradient(circle, rgba(239,35,60,0.4) 1px, transparent 1px) 0 0 / 22px 22px, #08080a;
+}
+[data-theme="scarlet-ops"] .bg-ink-900, [data-theme="scarlet-ops"] .bg-ink-850 { box-shadow: 0 0 0 1px rgba(239,35,60,0.1); }
+
+/* ====================================================== 15. Garnet & Champagne (light) */
+[data-theme="garnet-champagne"] {
+  --color-ink-950: #f0e6df; --color-ink-900: #ffffff; --color-ink-850: #fbf7f4; --color-ink-800: #f6efe9;
+  --color-ink-700: #ece0d7; --color-ink-600: #ddcabf; --color-ink-500: #c6ab9d;
+  --color-silver-50: #1a1012; --color-silver-100: #26181a; --color-silver-200: #3a262a; --color-silver-400: #6a4f52;
+  --color-silver-500: #8a6d70; --color-silver-600: #a98c8f; --cage-accent: #7a1626;
+}
+
+/* Light-theme badge/alert contrast: darken the status text so it reads on light surfaces. */
+[data-theme="alabaster"], [data-theme="garnet-champagne"] {
+  --color-emerald-300: #047857; --color-amber-300: #b45309; --color-red-300: #b91c1c; --color-sky-300: #0369a1;
+  --color-emerald-200: #065f46; --color-amber-200: #92400e; --color-red-200: #991b1b; --color-sky-200: #075985;
+}
+[data-theme="alabaster"] body, [data-theme="garnet-champagne"] body { color-scheme: light; }
