@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Headset, Lock, Monitor, Power, PowerOff, ShieldOff, UserCheck, UserX } from 'lucide-react'
+import { Activity, Headset, Lock, Monitor, Power, PowerOff, ShieldOff, Terminal, UserCheck, UserX } from 'lucide-react'
 import { Alert, Badge, Button, Card, CardHeader, Field, Input, Spinner } from '@/components/ui/primitives'
 import { Dialog } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/useAuth'
@@ -8,6 +8,7 @@ import { api, describeError } from '@/services/api'
 import type { Device, InspectState, RemoteAction, RemoteCommand, RemoteSession } from '@/types/api'
 import { formatDateTime, relativeTime } from '@/utils/format'
 import { SessionStatusBadge, TerminateButton } from './shared'
+import { ShellTerminal } from './ShellTerminal'
 
 const LABEL: Record<string, string> = {
   'device.inspect': 'Status inspection', 'device.lock': 'Remote lock', 'device.restart': 'Remote restart',
@@ -36,19 +37,24 @@ export function RemotePanel({ device }: { device: Device }) {
   const { can } = useAuth()
   const qc = useQueryClient()
   const remote = can('devices:remote')
+  const canShell = can('devices:shell')
+  const canShellElevated = can('devices:shell_elevated')
   const [pending, setPending] = useState<Pending | null>(null)
   const [reason, setReason] = useState('')
   const [stepPw, setStepPw] = useState('')
   const [delay, setDelay] = useState(300)
   const [assistOpen, setAssistOpen] = useState(false)
   const [rdpOpen, setRdpOpen] = useState(false)
+  const [shellOpen, setShellOpen] = useState(false)
+  const [shellElevated, setShellElevated] = useState(false)
+  const [termSession, setTermSession] = useState<string | null>(null)
   const [assistMinutes, setAssistMinutes] = useState(30)
   const [rdpConnectMsg, setRdpConnectMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
 
   const actions = useQuery({ queryKey: ['device', device.id, 'actions'], queryFn: () => api.get<RemoteAction[]>(`/devices/${device.id}/actions`), refetchInterval: 5_000 })
   const sessions = useQuery({ queryKey: ['device', device.id, 'sessions'], queryFn: () => api.get<RemoteSession[]>(`/remote-sessions?device_id=${device.id}&limit=10`), refetchInterval: 5_000 })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['device', device.id] }) }
-  const reset = () => { setPending(null); setReason(''); setStepPw(''); setAssistOpen(false); setRdpOpen(false) }
+  const reset = () => { setPending(null); setReason(''); setStepPw(''); setAssistOpen(false); setRdpOpen(false); setShellOpen(false); setShellElevated(false) }
 
   const act = useMutation({
     mutationFn: async (p: Pending) => {
@@ -68,6 +74,11 @@ export function RemotePanel({ device }: { device: Device }) {
   const rdp = useMutation({
     // Unattended RDP: no password step-up (by design). The endpoint always shows a visible banner for the session.
     mutationFn: async () => api.post<RemoteSession>(`/devices/${device.id}/rdp`, { reason, max_minutes: assistMinutes }),
+    onSuccess: () => { refresh(); reset() },
+  })
+  const shell = useMutation({
+    // Live-response shell: break-glass arbitrary execution. Banner + full command audit; RBAC-gated server-side.
+    mutationFn: async () => api.post<RemoteSession>(`/devices/${device.id}/shell`, { reason, max_minutes: assistMinutes, elevated: shellElevated }),
     onSuccess: () => { refresh(); reset() },
   })
   const rdpConnect = useMutation({
@@ -98,12 +109,15 @@ export function RemotePanel({ device }: { device: Device }) {
       {open && (
         <Alert tone={open.status === 'active' ? 'warning' : 'info'}>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>{open.mode === 'rdp' ? <Monitor className="mr-1.5 inline size-4" /> : <Headset className="mr-1.5 inline size-4" />}
-              {open.mode === 'rdp' ? 'Remote desktop' : 'Remote assistance'} <b>{open.status.replace('_', ' ')}</b> — {open.requested_by_label}
+            <span>{open.mode === 'rdp' ? <Monitor className="mr-1.5 inline size-4" /> : open.mode === 'shell' ? <Terminal className="mr-1.5 inline size-4" /> : <Headset className="mr-1.5 inline size-4" />}
+              {open.mode === 'rdp' ? 'Remote desktop' : open.mode === 'shell' ? 'Live-response shell' : 'Remote assistance'} <b>{open.status.replace('_', ' ')}</b> — {open.requested_by_label}
               {open.expires_at && ` · ends ${formatDateTime(open.expires_at)}`}{open.status === 'requested' && ' · waiting for the endpoint'}</span>
             <div className="flex items-center gap-2">
               {open.mode === 'rdp' && open.status === 'active' && remote && (
                 <Button size="sm" variant="primary" loading={rdpConnect.isPending} onClick={() => { setRdpConnectMsg(null); rdpConnect.mutate(open.id) }}><Monitor />Connect</Button>
+              )}
+              {open.mode === 'shell' && open.status === 'active' && canShell && (
+                <Button size="sm" variant="primary" onClick={() => setTermSession(open.id)}><Terminal />Open terminal</Button>
               )}
               {remote && <TerminateButton session={open} onDone={refresh} />}
             </div>
@@ -124,6 +138,7 @@ export function RemotePanel({ device }: { device: Device }) {
               <Button size="sm" variant="outline" onClick={() => ask('device.logoff', {}, 'Log off the user', 'Ends the active interactive session, returning to the sign-in screen. Unsaved work in open applications may be lost.', true)}><UserX />Log off user</Button>
               <Button size="sm" onClick={() => { assist.reset(); setAssistOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Headset />Remote assistance</Button>
               <Button size="sm" onClick={() => { rdp.reset(); setRdpOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Monitor />Remote desktop</Button>
+              {canShell && <Button size="sm" variant="outline" onClick={() => { shell.reset(); setShellOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Terminal />Live-response shell</Button>}
             </div>
           )}
           <div className="border-t border-ink-700 px-4 py-3">
@@ -245,6 +260,24 @@ export function RemotePanel({ device }: { device: Device }) {
           <div className="flex justify-end"><Button type="submit" loading={rdp.isPending}><Monitor />Start remote desktop</Button></div>
         </form>
       </Dialog>
+
+      <Dialog open={shellOpen} onOpenChange={(o) => !o && reset()} title="Open a live-response shell"
+        description="Opens an interactive shell on the endpoint (arbitrary commands — break-glass). A visible banner is shown on the endpoint for the whole session and EVERY command is written to the audit trail. Runs as the logged-in user unless elevated.">
+        <form onSubmit={(e: FormEvent) => { e.preventDefault(); shell.mutate() }} className="space-y-3">
+          {shell.error && <Alert>{describeError(shell.error)}</Alert>}
+          <Field label="Reason (audited)" htmlFor="sr"><Input id="sr" required minLength={5} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+          <Field label="Maximum duration (minutes)" htmlFor="sm2"><Input id="sm2" type="number" min={5} max={120} value={assistMinutes} onChange={(e) => setAssistMinutes(Number(e.target.value))} /></Field>
+          {canShellElevated && (
+            <label className="flex items-center gap-2 text-sm text-silver-300">
+              <input type="checkbox" checked={shellElevated} onChange={(e) => setShellElevated(e.target.checked)} />
+              Run elevated (SYSTEM/root) — more dangerous, extra audit
+            </label>
+          )}
+          <div className="flex justify-end"><Button type="submit" variant="danger" loading={shell.isPending}><Terminal />Open shell</Button></div>
+        </form>
+      </Dialog>
+
+      {termSession && <ShellTerminal sessionId={termSession} hostname={device.hostname} onClose={() => setTermSession(null)} />}
     </div>
   )
 }
