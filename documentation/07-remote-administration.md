@@ -8,6 +8,8 @@
 | Lock | Agent in user session (`LockWorkStation`); broker in session 0 (`WTSDisconnectSession`) | reason | Immediate lock; unsaved work is kept |
 | Restart | Broker | reason + **password re-entry** | `shutdown /r` with 60–3600 s on-screen warning and message; cancellable |
 | Cancel restart | Broker | reason | `shutdown /a` |
+| Power off | Broker | reason | `shutdown /s` (cross-platform; `shutdown -h`/`-P` on Linux) |
+| Log off user | Broker (session 0 → `WTSLogoffSession`) | reason | Signs the active user out |
 | Disable / enable local account | Broker | reason + password | Refuses to disable the last enabled local administrator |
 | Remove from Administrators | Broker | reason + password | Refuses to demote the last enabled local administrator |
 
@@ -70,13 +72,22 @@ but it is *not* silent:
 * The relay pairs the two tunnels **in one process**, so run a single backend instance (or sticky-route the two
   `/rdp/tunnel` paths of a session to the same instance).
 
-### RDP limitations (not yet verified on real hardware)
+### Host support & limitations
 
-* **Windows endpoints only** in this version; a Linux target returns "needs attention". The full path (enable → banner →
-  tunnel → relay → `mstsc` → disable) has **not been verified on real machines across two networks** and must be tested
-  on isolated VMs before relying on it — enabling RDP and editing the firewall are privileged, security-sensitive.
-* Same session-0 caveat as assistance: if the agent cannot show the banner in the user's session, no RDP session starts.
-* Between the banner closing and the server-issued `rdp.end`, there is a brief window before RDP is disabled (seconds),
+* **Windows Pro/Enterprise:** the broker enables native RDP, then **verifies a listener comes up on `:3389`**. If none
+  does — notably on **Windows Home, which cannot host Remote Desktop at all** — the broker reverts its changes and
+  returns a clear *"this endpoint can't host Remote Desktop — use Remote Assistance instead"* message, rather than
+  letting the operator's `mstsc` hit a cryptic "can't connect" dialog.
+* **Linux:** the host is **xrdp**. The root agent enables it directly (`systemctl enable --now xrdp` + firewall) — there
+  is no separate broker on Linux — and shows the banner **in the logged-in desktop user's session**. It needs `xrdp`
+  installed and an active graphical session; with none it refuses (fail closed). *(Implemented; verify on a real Linux
+  desktop endpoint with xrdp before relying on it.)*
+* **Session-0 caveat:** if the agent cannot show the banner (a Windows **service** in session 0, or no graphical session
+  on Linux), no RDP session starts. The auto-start installer runs the agent as an **elevated logon task** in the user
+  session precisely so the banner works — see [`14-desktop-app.md`](14-desktop-app.md).
+* The full path (enable → banner → tunnel → relay → `mstsc` → disable) is **security-sensitive** (it toggles RDP and the
+  firewall) and should be tested on isolated VMs before relying on it.
+* Between the banner closing and the server-issued `rdp.end` there is a brief window before RDP is disabled (seconds),
   the same round-trip the assistance cleanup uses.
 
 ## Limitations

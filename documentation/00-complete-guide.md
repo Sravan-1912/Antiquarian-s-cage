@@ -1,11 +1,16 @@
 # Antiquarian's Cage — Complete Guide
 
-A single entry point to the whole platform: what it is, how it is built, how to run and operate it, and how the
-passkey-only sign-in works end to end. Deep dives live in the numbered documents referenced throughout; this guide ties
-them together and is kept current with the latest changes.
+A single entry point to the whole platform: what it is, how it is built, how to run and operate it. Deep dives live in
+the numbered documents referenced throughout; this guide ties them together and is kept current with the latest changes.
 
-> **Last updated: 2026-11-11.** Reflects **Phase 13 — passkey-only authentication**. There are **no passwords and no
-> TOTP** anywhere in the product; the only interactive sign-in is a WebAuthn passkey with user verification.
+> **Prefer diagrams?** [`15-architecture-and-flows.md`](15-architecture-and-flows.md) is a visual walkthrough
+> (architecture, enrollment, the signing chain, the animated cross-network RDP relay, compliance, auto-start).
+
+> **Sign-in is now password-based** (PBKDF2-HMAC-SHA256). A **Super Admin** creates organizations and admins, handing
+> each new admin a **one-time temporary password** they must reset on first login. WebAuthn passkeys remain available for
+> step-up/SSO. (The earlier passkey-only sign-in was replaced.) Recent additions: **cross-network Remote Desktop +
+> Remote Assistance** over a relay, a **cross-platform (Windows + Linux) agent**, **indefinite enrollment tokens**,
+> **Windows/Linux auto-start installers**, and **single-service cloud deployment**.
 
 ---
 

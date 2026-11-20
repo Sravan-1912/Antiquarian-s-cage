@@ -68,6 +68,48 @@ only on a trusted network or through a tunnel/reverse proxy you control. See
 `documentation/13-cloud-deployment.md` for the hosted option, which is the recommended path when
 friends'/colleagues' devices need to enrol over the internet.
 
+## Connecting the desktop app to a hosted backend (for RDP across networks)
+
+By default the app runs its **own loopback backend**. To use it as an operator console against a **shared/cloud**
+backend — which is also what lets you click **Connect** to launch `mstsc` for a cross-network RDP session — launch it
+with the backend URL set:
+
+```powershell
+setx CAGE_REMOTE_BACKEND_URL "https://your-backend"   # once; then relaunch the app from the Start Menu
+```
+
+The app then loads the cloud console *and* keeps the local `mstsc` bridge (`window.cageRdp`). A plain browser has no such
+bridge, so **Connect** in a browser explains that the desktop app is required. See
+[`07-remote-administration.md`](07-remote-administration.md).
+
+## Endpoint auto-start (agent + broker as background services)
+
+So you don't have to run the agent and broker by hand after every reboot, install them to start automatically. Run on an
+**already-enrolled** endpoint.
+
+**Windows** — from an **elevated** PowerShell, with `cage-agent.exe`, `cage-broker.exe` and `cage-broker-service.exe` in
+one folder (built by `agent/installer/build.ps1`):
+
+```powershell
+.\install.ps1     # agent/installer/install.ps1 ; .\uninstall.ps1 to remove
+```
+
+It installs the **broker as a LocalSystem service** (`CageBroker`, auto-start, pinned to this device's command key, its
+state dir locked down) and registers the **agent as a hidden, elevated logon Scheduled Task**. The agent runs as a
+**logon task, not a service, on purpose:** a session-0 service cannot show the mandatory RDP/assist banner, so the agent
+must run in the **interactive user session** — and running it **elevated** also means its token carries Administrators,
+which the broker pipe admits. (Running the agent elevated additionally resolves the elevation-gated compliance checks —
+Secure Boot, audit policy, BitLocker.)
+
+**Linux** — the agent runs as a **root systemd service** (`Restart=always`, enabled on boot):
+
+```bash
+sudo ./installer/linux/install.sh --server https://your-backend --token XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
+# sudo ./installer/linux/uninstall.sh [--purge] to remove
+```
+
+There is no separate broker on Linux — the root agent performs privileged actions itself.
+
 ## Building the installer
 
 From a Windows machine with Node + npm and the backend virtualenv (`backend/.venv`) ready:

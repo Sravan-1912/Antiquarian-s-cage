@@ -3,19 +3,22 @@
 Endpoint management and workforce security platform: employee identity, Windows endpoint
 administration (agent), security policy & compliance, and tamper-evident security operations.
 
-> **New here? Read [`documentation/00-complete-guide.md`](documentation/00-complete-guide.md)** — one page covering what
-> the system is, all phases, how to run/test/operate it, and the passkey-only sign-in end to end.
+> **New here?** Read [`documentation/00-complete-guide.md`](documentation/00-complete-guide.md) for the prose tour, or
+> [`documentation/15-architecture-and-flows.md`](documentation/15-architecture-and-flows.md) for a **diagram-first**
+> walkthrough (architecture, enrollment, the signing chain, the animated cross-network RDP relay, compliance, auto-start).
 
-> **Status: Phases 1–12 implemented, Phase 13 (passkey-only auth) implemented** (foundation, endpoint management,
-> security policies + compliance, remote administration, identity security, security operations, hardening, the Cage
-> Authenticator Android app, fleet overview with real network usage, admin isolation, subscription/device quotas,
-> passkey-only authentication). Phase 10 (Windows sign-in approved from the phone) is built and tested
-> off the lock screen; it still has to be verified on a Windows 10/11 test VM (`documentation/12-windows-phone-unlock.md`). What has actually been verified is in
-> `documentation/test-log.md`; operating procedures are in `documentation/10-operations-runbook.md`.
+> **Status:** Foundation, endpoint management, security policies + compliance, remote administration, identity
+> security, security operations, hardening, fleet overview, admin isolation and subscription/device quotas are
+> implemented. More recent work: **password authentication**, **Super-Admin organization/admin provisioning with
+> temp-password handover**, **cross-network Remote Desktop + Remote Assistance** over a relay (no VPN), a **privileged
+> broker**, **indefinite enrollment tokens**, a **cross-platform (Windows + Linux) agent**, **Windows/Linux auto-start
+> installers**, and an **Electron desktop app** + **single-service cloud deployment**. What has actually been verified
+> is in `documentation/test-log.md`; operating procedures are in `documentation/10-operations-runbook.md`.
 >
-> **Console sign-in is passkey-only** (WebAuthn, user-verification required). There are no passwords or TOTP: bootstrap,
-> invitation and admin-issued recovery each run a single-use token → passkey registration ceremony, and a break-glass CLI
-> (`python -m app.recover <email>`) recovers a sole Super Admin. See `documentation/08-identity-and-sso.md`.
+> **Console sign-in is password-based** (PBKDF2-HMAC-SHA256). A **Super Admin** creates organizations and admins; each
+> new admin receives a **one-time temporary password** and is forced to reset it on first login. A break-glass CLI
+> (`python -m app.recover <email>`) recovers a sole Super Admin. WebAuthn passkeys remain available for SSO/MFA. See
+> `documentation/08-identity-and-sso.md`.
 
 ## Repository layout
 
@@ -37,8 +40,8 @@ agent/            Windows endpoint agent (Python, separate from the backend) —
 | Area | What works |
 |---|---|
 | Bootstrap | First-run organisation + Super Admin registration; closes automatically once a user exists |
-| Authentication | **Passkey-only** (WebAuthn, user-verification required — no passwords anywhere). Passwordless bootstrap, invitation and admin-issued recovery each run a single-use token → passkey registration ceremony; logout; break-glass CLI (`python -m app.recover`) |
-| MFA | Not a separate step: a passkey with user verification already combines possession + biometric/PIN, so it satisfies MFA on its own (TOTP removed) |
+| Authentication | **Password** (PBKDF2-HMAC-SHA256). Super-Admin-created orgs and admins; one-time **temporary password** handover with forced reset on first login (`must_change_password`); logout; break-glass CLI (`python -m app.recover`) |
+| MFA / passkeys | WebAuthn passkeys available for step-up and SSO (user verification combines possession + biometric/PIN) |
 | Sessions | Opaque server-side sessions (hashed), idle + absolute expiry, list/revoke, revoke others |
 | Brute force | Per-IP rate limits, per-account lockout, lockout notifications, uniform error responses |
 | RBAC | 23 permissions, 5 built-in roles, enforced in backend dependencies; denials audited |
@@ -52,7 +55,7 @@ agent/            Windows endpoint agent (Python, separate from the backend) —
 
 | Area | What works |
 |---|---|
-| Enrollment | Single-use, short-lived tokens (shown once, stored hashed, optional employee pre-assignment, revocable) |
+| Enrollment | Single-use tokens (shown once, stored hashed, optional employee pre-assignment, revocable); validity 15 min–24 h **or "Never (indefinite)"** so you don't lose the ability to (re)enrol |
 | Device identity | Agent-generated P-256 key (DPAPI-protected), CSR → certificate from internal device CA, CN = server UUID |
 | Agent auth | Every request signed (timestamp ±5 min, single-use nonce, body hash) + mTLS at Nginx in production |
 | Heartbeat | Online/offline derived only from authenticated heartbeats with configurable interval/threshold |
@@ -78,8 +81,9 @@ See `documentation/06-policy-recovery.md` for rollback and manual recovery per p
 
 | Area | What works |
 |---|---|
-| Remote actions | Status inspection, lock, restart (warned, cancellable), cancel restart, disable/enable local account, remove from Administrators — signed, allowlisted, schema-checked by server, agent and broker; a fresh passkey confirmation (step-up) for sensitive actions; last-admin protection |
-| Remote assistance | Consent prompt by default (auto-decline), always-on-top indicator with End button, Quick Assist launched only after consent, maximum duration, termination from either side, server + endpoint expiry, verified cleanup with privileged fallback, full audit trail |
+| Remote actions | Status inspection, lock, restart (warned, cancellable), cancel restart, **power off**, **log off**, disable/enable local account, remove from Administrators — signed, allowlisted, schema-checked by server, agent and broker; last-admin protection |
+| Remote Desktop | **Unattended RDP tunnelled over the relay — works across any network, no VPN, no inbound hole.** Mandatory on-screen banner (fail closed); broker enables native Windows RDP (or **xrdp** on Linux) and verifies a host came up (Windows **Home** can't host RDP → clear message); connect `mstsc` from the desktop app |
+| Remote assistance | Consent prompt by default, always-on-top indicator with End button, Quick Assist launched only after consent, maximum duration, termination from either side, server + endpoint expiry, verified cleanup with privileged fallback, full audit trail |
 | Console | Remote administration panel and local-accounts view per endpoint, action and session history, Remote sessions page, organisation remote-assistance policy (consent, max duration, IT Support access) |
 
 Details and limitations: `documentation/07-remote-administration.md`.

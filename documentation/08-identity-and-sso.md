@@ -1,26 +1,23 @@
-# Identity, passkeys and single sign-on
+# Identity, authentication and single sign-on
 
-## Console sign-in: passkeys only
+## Console sign-in: password
 
-There are **no passwords and no TOTP**. The only interactive sign-in is a WebAuthn passkey with user verification, which
-already combines possession (the authenticator) with a biometric/PIN and therefore counts as MFA on its own.
+Console sign-in is **password-based** — PBKDF2-HMAC-SHA256 (stdlib, bundles cleanly into the frozen backend). Accounts
+are **provisioned by a Super Admin**, not self-registered:
 
-Because you cannot register a passkey without first proving who you are — and there is no password to do that — every
-"set your credential" moment is a **single-use, short-lived token that drives a passkey registration ceremony**:
+* **Bootstrap** — first-run `register` creates the first organization + Super Admin with a password.
+* **Organizations** — a Super Admin creates organizations (`POST /organizations`).
+* **Admins** — a Super Admin creates an admin for an organization; the backend returns a **one-time temporary password**
+  (shown once in the console). The admin signs in with it and is **forced to reset it on first login**
+  (`must_change_password` → `POST /auth/password`). This is the *handover*: credentials are created by the Super Admin
+  and transferred to the admin, who immediately sets their own password.
+* **Change password** — any user can change their own password; a failed login is **rate-limited** (per-IP and
+  per-account, with lockout) and feeds the security-operations detection rules.
+* **Break-glass** — `python -m app.recover <email>` is a server-only command (needs host DB access, like
+  `app.preflight`) that recovers a sole Super Admin who is locked out.
 
-* **Bootstrap** — first-run `register` creates the org + Super Admin in `pending` and returns an enrolment token; the
-  ceremony registers the first passkey, activates the account and signs in.
-* **Invitation** — inviting an administrator (or an employee to the workspace) emails an `/accept-invite` link carrying
-  the same kind of token.
-* **Admin-issued recovery** — `POST /users/{id}/recovery` (permission `users:manage`) issues a `passkey_recovery` token
-  and emails a `/recover` link; completing it **revokes the user's old passkeys** and enrols a new one. There is no
-  self-service email recovery.
-* **Break-glass** — `python -m app.recover <email>` is a server-only command (needs host DB access, like `app.preflight`)
-  that mints a recovery link for a sole Super Admin who has lost every passkey. This is what makes admin-issued-only recovery safe.
-
-Tokens are stored hashed, single-use, and consumed on success. A failed passkey assertion is rate-limited (per-IP and
-per-account) and feeds the security-operations detection rules. The former phone-approval *console* sign-in was removed;
-a phone remains a first-class console passkey via standard WebAuthn (platform or cross-device/hybrid).
+WebAuthn **passkeys remain available** for sensitive-action **step-up** and as SSO/MFA authenticators (see *Passkeys*
+below); they are no longer the sole sign-in. (The earlier passkey-only and phone-approval console sign-ins were removed.)
 
 ## Employee accounts (joiner / mover / leaver)
 
