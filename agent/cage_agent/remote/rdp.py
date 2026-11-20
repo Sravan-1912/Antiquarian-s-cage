@@ -97,7 +97,8 @@ async def _tunnel_main(url: str, ctx: ssl.SSLContext | None, stop: threading.Eve
     import websockets
     while not stop.is_set():
         try:
-            async with websockets.connect(url, ssl=ctx, max_size=None, open_timeout=20, ping_interval=20) as ws:
+            async with websockets.connect(url, ssl=ctx, max_size=None, open_timeout=20,
+                                          ping_interval=20, ping_timeout=20, close_timeout=10) as ws:
                 await _bridge_once(ws, stop, device_sign)
         except Exception as exc:  # noqa: BLE001
             log.debug("rdp tunnel reconnect after: %s", exc)
@@ -140,8 +141,14 @@ async def _bridge_once(ws, stop: threading.Event, device_sign: Callable[[bytes],
         _done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
+        # Drain both tasks so a closed-connection exception is never left "unretrieved" (which spams the log and
+        # looked like a crash). One side ending just means this operator session closed; the tunnel reconnects.
+        await asyncio.gather(t1, t2, return_exceptions=True)
     finally:
-        sock.close()
+        try:
+            sock.close()
+        except OSError:
+            pass
 
 
 def _connect_local_rdp() -> socket.socket | None:
@@ -151,19 +158,27 @@ def _connect_local_rdp() -> socket.socket | None:
 
 
 async def _ws_to_sock(ws, sock, loop, session=None) -> None:
-    async for msg in ws:
-        data = msg.encode() if isinstance(msg, str) else msg
-        if session is not None:
-            data = session.open(data)  # decrypt the operator→endpoint frame
-        await loop.sock_sendall(sock, data)
+    # Operator → endpoint. End cleanly on any close/decrypt error; the outer loop reconnects for the next session.
+    try:
+        async for msg in ws:
+            data = msg.encode() if isinstance(msg, str) else msg
+            if session is not None:
+                data = session.open(data)  # decrypt the operator→endpoint frame
+            await loop.sock_sendall(sock, data)
+    except Exception:  # noqa: BLE001 - WebSocket closed (incl. "no close frame"), socket gone, or a bad E2E frame
+        return
 
 
 async def _sock_to_ws(ws, sock, loop, session=None) -> None:
-    while True:
-        data = await loop.sock_recv(sock, 65536)
-        if not data:
-            return
-        await ws.send(session.seal(data) if session is not None else data)  # encrypt endpoint→operator
+    # Endpoint → operator. Same: a clean return on close instead of an unhandled ConnectionClosedError.
+    try:
+        while True:
+            data = await loop.sock_recv(sock, 65536)
+            if not data:
+                return
+            await ws.send(session.seal(data) if session is not None else data)
+    except Exception:  # noqa: BLE001
+        return  # encrypt endpoint→operator
 
 
 @dataclass

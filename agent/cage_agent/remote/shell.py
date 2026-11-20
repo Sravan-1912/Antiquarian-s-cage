@@ -181,29 +181,38 @@ async def _shell_bridge(ws, stop, device_sign, audit_cb) -> None:
         stderr=asyncio.subprocess.STDOUT, creationflags=NO_WINDOW if _IS_WIN else 0)
 
     async def op_to_shell(initial: bytes | None) -> None:
-        if initial:
-            audit_cb(initial)
-            proc.stdin.write(initial)
-            await proc.stdin.drain()
-        async for msg in ws:
-            data = msg.encode() if isinstance(msg, str) else msg
-            if session is not None:
-                data = session.open(data)
-            audit_cb(data)
-            proc.stdin.write(data)
-            await proc.stdin.drain()
+        try:
+            if initial:
+                audit_cb(initial)
+                proc.stdin.write(initial)
+                await proc.stdin.drain()
+            async for msg in ws:
+                data = msg.encode() if isinstance(msg, str) else msg
+                if session is not None:
+                    data = session.open(data)
+                audit_cb(data)
+                proc.stdin.write(data)
+                await proc.stdin.drain()
+        except Exception:  # noqa: BLE001 - WS closed or shell gone: end cleanly
+            return
 
     async def shell_to_op() -> None:
-        while True:
-            data = await proc.stdout.read(65536)
-            if not data:
-                return
-            await ws.send(session.seal(data) if session is not None else data)
+        try:
+            while True:
+                data = await proc.stdout.read(65536)
+                if not data:
+                    return
+                await ws.send(session.seal(data) if session is not None else data)
+        except Exception:  # noqa: BLE001
+            return
 
     t1 = asyncio.create_task(op_to_shell(first))
     t2 = asyncio.create_task(shell_to_op())
     try:
         await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+        for t in (t1, t2):
+            t.cancel()
+        await asyncio.gather(t1, t2, return_exceptions=True)
     finally:
         for t in (t1, t2):
             t.cancel()
