@@ -42,7 +42,7 @@ $brokerService = Join-Path $InstallDir 'cage-broker-service.exe'
 if (Get-Service -Name $SvcName -ErrorAction SilentlyContinue) {
     Stop-Service -Name $SvcName -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $brokerService) { & $brokerService remove | Out-Null }
-    else { & sc.exe delete $SvcName | Out-Null }
+    else { $sc = Join-Path $env:SystemRoot 'System32\sc.exe'; if (-not (Test-Path -LiteralPath $sc)) { $sc = 'sc.exe' }; & $sc delete $SvcName | Out-Null }
     Write-Host "  Removed broker service '$SvcName'." -ForegroundColor Green
 }
 

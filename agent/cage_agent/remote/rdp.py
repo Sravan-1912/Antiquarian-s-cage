@@ -83,6 +83,7 @@ def run_tunnel(server_url: str, ca_bundle: str | None, session_id: str, token: s
     """Keep an outbound relay tunnel to the backend while the session lasts, reconnecting between operator sessions.
     `device_sign` (ECDSA over bytes with the device key) enables the end-to-end encrypted path when the operator asks."""
     url = _ws_url(server_url, session_id, token)
+    log.info("rdp tunnel: starting, dialing relay at %s", url.split("?")[0])
     ctx = None
     if url.startswith("wss://"):
         ctx = ssl.create_default_context(cafile=ca_bundle) if ca_bundle else ssl.create_default_context()
@@ -99,9 +100,10 @@ async def _tunnel_main(url: str, ctx: ssl.SSLContext | None, stop: threading.Eve
         try:
             async with websockets.connect(url, ssl=ctx, max_size=None, open_timeout=20,
                                           ping_interval=20, ping_timeout=20, close_timeout=10) as ws:
+                log.info("rdp tunnel: relay WebSocket connected; waiting for the operator")
                 await _bridge_once(ws, stop, device_sign)
         except Exception as exc:  # noqa: BLE001
-            log.debug("rdp tunnel reconnect after: %s", exc)
+            log.warning("rdp tunnel: relay connection failed (%s: %s); retrying", exc.__class__.__name__, exc)
         if not stop.is_set():
             await asyncio.sleep(1)
 
@@ -111,9 +113,11 @@ async def _bridge_once(ws, stop: threading.Event, device_sign: Callable[[bytes],
     try:
         first = await asyncio.wait_for(ws.recv(), timeout=110)
     except asyncio.TimeoutError:
+        log.info("rdp tunnel: no operator connected within 110s; reconnecting")
         return
     if stop.is_set():
         return
+    log.info("rdp tunnel: operator connected (%d bytes); bridging to local RDP", len(first) if first else 0)
     first = first.encode() if isinstance(first, str) else first
     session = None
     if device_sign is not None and first.startswith(E2E_MAGIC):
@@ -129,10 +133,12 @@ async def _bridge_once(ws, stop: threading.Event, device_sign: Callable[[bytes],
     try:
         sock = await loop.run_in_executor(None, _connect_local_rdp)
     except OSError as exc:
-        log.warning("cannot reach local Remote Desktop (127.0.0.1:3389): %s", exc)
+        log.warning("rdp tunnel: cannot reach local Remote Desktop (127.0.0.1:3389): %s", exc)
         return
     if sock is None:
+        log.warning("rdp tunnel: local Remote Desktop (127.0.0.1:3389) not reachable (no listener?)")
         return
+    log.info("rdp tunnel: bridging operator <-> 127.0.0.1:3389 (session live)")
     try:
         if first:
             await loop.sock_sendall(sock, first)
@@ -268,10 +274,14 @@ class RdpManager:
         live = _Live(ind)
         token = p.get("tunnel_token", "")
         if token and self.server_url:
+            log.info("rdp.start: enabled OK; launching relay tunnel thread for session %s", sid[:8])
             live.tunnel = threading.Thread(target=run_tunnel,
                                            args=(self.server_url, self.ca_bundle, sid, token, live.stop, self.device_sign),
                                            name=f"rdp-tunnel-{sid[:8]}", daemon=True)
             live.tunnel.start()
+        else:
+            log.warning("rdp.start: NOT starting tunnel (tunnel_token present=%s, server_url present=%s)",
+                        bool(token), bool(self.server_url))
         with self._lock:
             self.live[sid] = live
         self.report(job_id, {"status": "succeeded", "detail": "Remote desktop active (relayed); connect from the console",

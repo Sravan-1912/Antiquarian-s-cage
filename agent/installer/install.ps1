@@ -95,9 +95,13 @@ if ($LASTEXITCODE -ne 0) { throw "Broker service install failed (exit $LASTEXITC
 if ($LASTEXITCODE -ne 0) { throw "Broker pin failed (exit $LASTEXITCODE). Is the endpoint enrolled?" }
 
 # 5) Lock down the broker state directory to SYSTEM + Administrators only.
+#    Call icacls by its absolute path — some endpoints have a trimmed PATH that lacks System32, which would otherwise
+#    fail with "'icacls.exe' is not recognized".
 $brokerState = Join-Path $DataDir 'broker'
 New-Item -ItemType Directory -Force -Path $brokerState | Out-Null
-& icacls.exe $brokerState /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+$icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+if (-not (Test-Path -LiteralPath $icacls)) { $icacls = 'icacls.exe' }  # fall back to PATH lookup
+& $icacls $brokerState /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 
 # 6) Start the broker service now.
 Start-Service -Name $SvcName
@@ -114,7 +118,9 @@ CreateObject("WScript.Shell").Run """$agent"" run", 0, False
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
-$action    = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$vbs`""
+$wscript   = Join-Path $env:SystemRoot 'System32\wscript.exe'
+if (-not (Test-Path -LiteralPath $wscript)) { $wscript = 'wscript.exe' }  # fall back to PATH lookup
+$action    = New-ScheduledTaskAction -Execute $wscript -Argument "`"$vbs`""
 $trigger   = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
