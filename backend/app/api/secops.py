@@ -372,3 +372,70 @@ def test_chat_webhook(platform: str, ctx: AuthContext = Depends(SIEM_SETTINGS), 
     if w is None:
         raise HTTPException(404, "channel not configured")
     return chat.send_test(db, w)
+
+
+# ---- Automated-response playbooks (SOAR) ----
+class PlaybookIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    enabled: bool = True
+    match_rule_keys: list[str] = Field(default_factory=list, max_length=40)
+    match_min_severity: Literal["critical", "high", "medium", "low", "informational"] = "high"
+    match_kinds: list[Literal["configuration", "operational", "suspicious_activity"]] = Field(default_factory=list, max_length=5)
+    actions: list[Literal["isolate", "escalate", "comment"]] = Field(default_factory=list, max_length=5)
+
+
+def _pb_out(pb) -> dict:
+    return {"id": str(pb.id), "name": pb.name, "enabled": pb.enabled, "match_rule_keys": pb.match_rule_keys,
+            "match_min_severity": pb.match_min_severity, "match_kinds": pb.match_kinds, "actions": pb.actions}
+
+
+@router.get("/playbooks")
+def list_playbooks(ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    from app.models import ResponsePlaybook
+    rows = db.scalars(select(ResponsePlaybook).where(ResponsePlaybook.organization_id == ctx.user.organization_id)
+                      .order_by(ResponsePlaybook.created_at)).all()
+    return [_pb_out(p) for p in rows]
+
+
+@router.get("/playbooks/rule-keys")
+def playbook_rule_keys(_: AuthContext = Depends(SIEM_SETTINGS)):
+    """The alert rules a playbook can trigger on (key + human name), for the config UI."""
+    from app.services.alerts import RULES
+    return [{"key": k, "name": v["name"], "kind": v["kind"]} for k, v in RULES.items()]
+
+
+@router.post("/playbooks", status_code=201)
+def create_playbook(body: PlaybookIn, ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    from app.models import ResponsePlaybook
+    pb = ResponsePlaybook(id=uuid.uuid4(), organization_id=ctx.user.organization_id, name=body.name, enabled=body.enabled,
+                          match_rule_keys=body.match_rule_keys, match_min_severity=body.match_min_severity,
+                          match_kinds=body.match_kinds, actions=body.actions)
+    db.add(pb)
+    audit.record(db, ctx.user.organization_id, ctx.actor, "playbook.created", target_type="playbook", target_id=pb.id,
+                 target_label=body.name, metadata={"actions": body.actions, "min_severity": body.match_min_severity})
+    db.commit()
+    return _pb_out(pb)
+
+
+@router.put("/playbooks/{pid}")
+def update_playbook(pid: uuid.UUID, body: PlaybookIn, ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    from app.models import ResponsePlaybook
+    pb = db.scalar(select(ResponsePlaybook).where(ResponsePlaybook.id == pid, ResponsePlaybook.organization_id == ctx.user.organization_id))
+    if pb is None:
+        raise HTTPException(404, "playbook not found")
+    pb.name, pb.enabled = body.name, body.enabled
+    pb.match_rule_keys, pb.match_min_severity, pb.match_kinds, pb.actions = body.match_rule_keys, body.match_min_severity, body.match_kinds, body.actions
+    pb.updated_at = utcnow()
+    audit.record(db, ctx.user.organization_id, ctx.actor, "playbook.updated", target_type="playbook", target_id=pb.id, target_label=body.name)
+    db.commit()
+    return _pb_out(pb)
+
+
+@router.delete("/playbooks/{pid}", status_code=204)
+def delete_playbook(pid: uuid.UUID, ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    from app.models import ResponsePlaybook
+    pb = db.scalar(select(ResponsePlaybook).where(ResponsePlaybook.id == pid, ResponsePlaybook.organization_id == ctx.user.organization_id))
+    if pb:
+        db.delete(pb)
+        audit.record(db, ctx.user.organization_id, ctx.actor, "playbook.removed", target_type="playbook", target_id=pid, target_label=pb.name)
+        db.commit()

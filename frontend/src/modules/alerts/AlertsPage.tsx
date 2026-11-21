@@ -6,6 +6,7 @@ import { Alert, Badge, Button, Card, CardHeader, EmptyState, Field, Input, PageH
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError, qs } from '@/services/api'
 import { ChatChannelsCard } from './ChatChannelsCard'
+import { PlaybooksCard } from './PlaybooksCard'
 import { formatDateTime, relativeTime } from '@/utils/format'
 
 export type Sev = 'critical' | 'high' | 'medium' | 'low' | 'informational'
@@ -37,7 +38,7 @@ export function AlertsPage() {
   return (
     <div className="animate-fade-in space-y-4">
       <PageHeader title="Security alerts" description="Leads for investigation. Configuration findings and operational issues are not evidence of an attack; suspicious-activity alerts need an analyst's judgement." />
-      {can('org:settings') && <ChatChannelsCard />}
+      {can('org:settings') && <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0"><PlaybooksCard /><ChatChannelsCard /></div>}
       <Card>
         <div className="flex flex-wrap gap-2 border-b border-ink-700 p-3">
           <Input placeholder="Search titles…" className="max-w-xs" value={f.q} onChange={set('q')} aria-label="Search alerts" />

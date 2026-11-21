@@ -155,3 +155,19 @@ class ChatDelivery(UUIDPk, Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     next_attempt_at: Mapped[datetime] = mapped_column(default=utcnow)
     sent_at: Mapped[datetime | None]
+
+
+class ResponsePlaybook(UUIDPk, Base):
+    """Automated response (SOAR): when a security alert matches the trigger, run the listed actions
+    (isolate the endpoint, escalate to critical, add a note). One organization may have several playbooks."""
+
+    __tablename__ = "response_playbooks"
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    match_rule_keys: Mapped[list] = mapped_column(JSON, default=list)   # [] = any rule
+    match_min_severity: Mapped[str] = mapped_column(String(12), default="high")
+    match_kinds: Mapped[list] = mapped_column(JSON, default=list)       # [] = any kind
+    actions: Mapped[list] = mapped_column(JSON, default=list)           # ["isolate", "escalate", "comment"]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)

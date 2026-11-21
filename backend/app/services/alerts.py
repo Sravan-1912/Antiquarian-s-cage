@@ -99,6 +99,11 @@ def raise_alert(db: Session, org_id: uuid.UUID, rule_key: str, *, title: str, de
         chat.enqueue(db, org_id, payload, severity)
     except Exception:  # noqa: BLE001
         pass
+    try:  # automated-response playbooks (SOAR) — best-effort, runs once per new alert
+        from app.services import playbooks
+        playbooks.evaluate(db, a)
+    except Exception:  # noqa: BLE001
+        pass
     return a
 
 
