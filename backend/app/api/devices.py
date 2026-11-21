@@ -16,11 +16,12 @@ from app.api.deps import AuthContext, require_permission
 from app.core.config import get_settings
 from app.core.database import get_db, utcnow
 from app.models import (
-    Device, DeviceCertificate, DeviceEvent, DeviceHeartbeat, DeviceInventory, Employee, EnrollmentToken, User,
+    Device, DeviceCertificate, DeviceEvent, DeviceHeartbeat, DeviceInventory, DeviceLocation, Employee,
+    EnrollmentToken, User,
 )
 from app.schemas import endpoints as s
 from app.schemas.common import Page
-from app.services import audit, devices, subscriptions, tenancy
+from app.services import audit, devices, subscriptions, tenancy, webactivity
 from app.services.devices import DeviceError
 
 router = APIRouter(tags=["endpoints"])
@@ -232,6 +233,44 @@ def device_certificates(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), 
     _get(db, ctx, device_id)
     return db.scalars(select(DeviceCertificate).where(DeviceCertificate.device_id == device_id)
                       .order_by(DeviceCertificate.created_at.desc())).all()
+
+
+@router.get("/devices/{device_id}/location", response_model=s.DeviceLocationOut | None)
+def device_location(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """Latest resolved position for one endpoint (source + accuracy radius included; approximate, never exact)."""
+    _get(db, ctx, device_id)
+    return db.scalar(select(DeviceLocation).where(DeviceLocation.device_id == device_id))
+
+
+@router.get("/devices/{device_id}/top-sites", response_model=list[s.DeviceTopSiteOut])
+def device_top_sites(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """Most-visited domains reported by one endpoint's browsers (aggregated counts, no full URLs)."""
+    _get(db, ctx, device_id)
+    return webactivity.device_top(db, device_id, limit=20)
+
+
+@router.get("/geo/locations", response_model=list[s.FleetLocationOut])
+def fleet_locations(ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """Every visible endpoint that has a resolved position — for the fleet map."""
+    rows = db.execute(
+        _scope(select(Device, DeviceLocation).join(DeviceLocation, DeviceLocation.device_id == Device.id), ctx)
+        .where(DeviceLocation.latitude.is_not(None))
+    ).all()
+    return [
+        s.FleetLocationOut(
+            device_id=d.id, display_name=d.display_name, hostname=d.hostname, source=loc.source,
+            latitude=loc.latitude, longitude=loc.longitude, accuracy_m=loc.accuracy_m,
+            city=loc.city, country=loc.country, resolved_at=loc.resolved_at,
+        )
+        for d, loc in rows
+    ]
+
+
+@router.get("/web-activity/top-sites", response_model=list[s.TopSiteOut])
+def web_activity_top(ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """Fleet-wide top 10 websites across all visible endpoints (aggregated domain visit counts)."""
+    device_ids = list(db.scalars(_scope(select(Device.id), ctx)).all())
+    return webactivity.fleet_top(db, device_ids, limit=10)
 
 
 @router.patch("/devices/{device_id}", response_model=s.DeviceOut)

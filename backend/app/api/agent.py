@@ -129,6 +129,24 @@ def telemetry(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get
     return {"accepted": True, "matched": matched}
 
 
+@router.post("/location", status_code=202)
+def location(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Resolve the endpoint's position from its reported Wi-Fi access points (or IP fallback). Agent-signed."""
+    from app.services import geolocation
+    req = _parse(s.LocationRequest, ctx.body)
+    geolocation.resolve_and_store(db, ctx.device, [ap.model_dump() for ap in req.wifi_access_points], ctx.ip)
+    return {"accepted": True}
+
+
+@router.post("/web-activity", status_code=202)
+def web_activity(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Store the endpoint's aggregated per-domain visit counts (no full URLs) for the fleet Top-websites view."""
+    from app.services import webactivity
+    req = _parse(s.WebActivityRequest, ctx.body)
+    webactivity.record(db, ctx.device.id, [sv.model_dump() for sv in req.sites])
+    return {"accepted": True}
+
+
 @router.post("/certificate/renew", response_model=s.RenewResponse)
 def renew(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
     req = _parse(s.RenewRequest, ctx.body)

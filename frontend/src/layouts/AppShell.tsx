@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as DM from '@radix-ui/react-dropdown-menu'
 import {
-  AppWindow, Bell, Briefcase, FileBarChart, ShieldAlert, ChevronDown, ClipboardCheck, FileLock2, Headset, LaptopMinimal, LayoutDashboard, LogOut, Menu, Palette, ScrollText, Search, ShieldCheck, UserCog, Users, X,
+  AppWindow, Bell, Briefcase, FileBarChart, ShieldAlert, ChevronDown, ClipboardCheck, FileLock2, Globe2, Headset, LaptopMinimal, LayoutDashboard, LogOut, Menu, Palette, ScrollText, Search, ShieldCheck, UserCog, Users, X,
 } from 'lucide-react'
 import { Wordmark } from '@/components/Logo'
 import { Badge, Spinner } from '@/components/ui/primitives'
@@ -28,6 +28,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     items: [
       { to: '/endpoints', label: 'Endpoints', icon: LaptopMinimal, anyPerm: ['devices:read', 'devices:read_assigned'] },
       { to: '/remote-sessions', label: 'Remote sessions', icon: Headset, anyPerm: ['devices:read', 'devices:read_assigned'] },
+      { to: '/insights', label: 'Web & locations', icon: Globe2, anyPerm: ['devices:read', 'devices:read_assigned'] },
     ],
   },
   {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import utcnow
@@ -121,6 +121,38 @@ class DeviceEvent(UUIDPk, Base):
     details: Mapped[dict] = mapped_column(default=dict)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class DeviceLocation(UUIDPk, Base):
+    """Latest resolved geolocation for a device (one row per device). `source` records how it was obtained and
+    `accuracy_m` the radius, so a position is never presented as more precise than it is. Wi-Fi/IP derived — approximate."""
+
+    __tablename__ = "device_locations"
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True, index=True)
+    source: Mapped[str] = mapped_column(String(8), default="none")  # wifi | ip | none
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
+    accuracy_m: Mapped[int | None] = mapped_column(Integer)  # radius in metres
+    city: Mapped[str | None] = mapped_column(String(128))
+    region: Mapped[str | None] = mapped_column(String(128))
+    country: Mapped[str | None] = mapped_column(String(64))
+    ip: Mapped[str | None] = mapped_column(String(64))
+    ap_count: Mapped[int] = mapped_column(Integer, default=0)  # Wi-Fi access points used
+    resolved_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class DeviceSiteVisit(UUIDPk, Base):
+    """Aggregated per-domain visit counts reported by the agent (no full URLs). One row per (device, domain)."""
+
+    __tablename__ = "device_site_visits"
+    __table_args__ = (
+        UniqueConstraint("device_id", "domain", name="uq_site_visit_device_domain"),
+        Index("ix_site_visits_device", "device_id"),
+    )
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
+    domain: Mapped[str] = mapped_column(String(255))
+    visits: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class AgentVersion(UUIDPk, Base):

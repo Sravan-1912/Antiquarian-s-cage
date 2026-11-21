@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # Address phones use to reach the API (pairing QR). Defaults to PUBLIC_BASE_URL; in development set it to this
     # machine's LAN address (e.g. http://192.168.1.20:8000) because a phone cannot reach "localhost".
     phone_api_base_url: str | None = None
+    # Optional: a Google Geolocation API key enables accurate Wi-Fi positioning for endpoints. When unset, endpoint
+    # location falls back to approximate IP-based geolocation. Either way the source + accuracy radius are shown.
+    google_geolocation_api_key: str | None = None
     expose_api_docs: bool = False
 
     database_url: str

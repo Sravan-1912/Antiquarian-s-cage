@@ -126,6 +126,27 @@ class TelemetryRequest(_Strict):
     events: list[TelemetryEvent] = Field(default_factory=list, max_length=200)
 
 
+class WifiAccessPoint(_Strict):
+    mac: str = Field(pattern=r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+    signal_dbm: int | None = Field(default=None, ge=-120, le=0)
+    channel: int | None = Field(default=None, ge=0, le=200)
+
+
+class LocationRequest(_Strict):
+    """Nearby Wi-Fi access points the server resolves to a position (or falls back to IP geolocation)."""
+    wifi_access_points: list[WifiAccessPoint] = Field(default_factory=list, max_length=50)
+
+
+class SiteVisitIn(_Strict):
+    domain: Annotated[str, StringConstraints(max_length=255, pattern=r"^[a-z0-9.\-]+$")]
+    visits: int = Field(ge=0, le=10_000_000)
+
+
+class WebActivityRequest(_Strict):
+    """Aggregated per-domain visit counts (no full URLs) for the fleet "Top websites" view."""
+    sites: list[SiteVisitIn] = Field(default_factory=list, max_length=100)
+
+
 class InventoryRequest(_Strict):
     agent_version: Tiny
     collected_at: datetime | None = None
@@ -253,3 +274,40 @@ class DeviceUpdate(BaseModel):
 
 class DeviceActionRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
+
+
+class DeviceLocationOut(ORMModel):
+    source: str  # wifi | ip | none
+    latitude: float | None
+    longitude: float | None
+    accuracy_m: int | None
+    city: str | None
+    region: str | None
+    country: str | None
+    ip: str | None
+    ap_count: int
+    resolved_at: datetime
+
+
+class FleetLocationOut(BaseModel):
+    device_id: uuid.UUID
+    display_name: str
+    hostname: str
+    source: str
+    latitude: float | None
+    longitude: float | None
+    accuracy_m: int | None
+    city: str | None
+    country: str | None
+    resolved_at: datetime
+
+
+class DeviceTopSiteOut(BaseModel):
+    domain: str
+    visits: int
+
+
+class TopSiteOut(BaseModel):
+    domain: str
+    visits: int
+    endpoints: int

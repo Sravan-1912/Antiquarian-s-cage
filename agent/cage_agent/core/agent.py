@@ -152,6 +152,24 @@ class Agent:
         if events:
             self.client.telemetry(self.key, {"events": events})
 
+    def location_once(self) -> None:
+        """Scan nearby Wi-Fi access points so the server can resolve a position (best-effort; IP fallback server-side)."""
+        try:
+            from cage_agent.collectors.geolocation import scan_access_points
+            self.client.location(self.key, {"wifi_access_points": scan_access_points()})
+        except Exception as exc:  # noqa: BLE001 — never take the agent down for a location scan
+            log.debug("location report skipped: %s", exc)
+
+    def web_activity_once(self) -> None:
+        """Report aggregated per-domain browser visit counts for the fleet "Top websites" view (best-effort)."""
+        try:
+            from cage_agent.collectors.webhistory import collect as collect_sites
+            sites = collect_sites()
+            if sites:
+                self.client.web_activity(self.key, {"sites": sites})
+        except Exception as exc:  # noqa: BLE001
+            log.debug("web-activity report skipped: %s", exc)
+
     def renew_certificate(self) -> None:
         new_key = identity.generate_key()
         resp = self.client.renew(self.key, {"csr_pem": identity.make_csr(new_key, socket.gethostname())})
@@ -181,6 +199,8 @@ class Agent:
                         self.telemetry_once()  # stream new-process telemetry every tick (cheap)
                     if self.server_status == "active" and time.monotonic() >= self.next_inventory:
                         self.inventory_once()
+                        self.location_once()      # Wi-Fi/IP geolocation, on the inventory cadence
+                        self.web_activity_once()  # aggregated top-domains, on the inventory cadence
                         self.next_inventory = time.monotonic() + self.cfg.inventory_interval_seconds
                     elif self.server_status == "suspended":
                         log.info("device is suspended by an administrator; only heartbeats are sent")
