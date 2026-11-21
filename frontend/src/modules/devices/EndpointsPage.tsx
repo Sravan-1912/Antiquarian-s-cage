@@ -20,7 +20,7 @@ function EnrollDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   const [copied, setCopied] = useState(false)
   const employees = useQuery({ queryKey: ['employees', 'active-all'], queryFn: () => api.get<Page<Employee>>('/employees?status=active&page_size=100'), enabled: open })
   const create = useMutation({
-    mutationFn: () => api.post<EnrollmentToken>('/enrollment-tokens', { label, employee_id: employeeId || null, expires_in_minutes: minutes }),
+    mutationFn: () => api.post<EnrollmentToken>('/enrollment-tokens', { label, employee_id: employeeId || null, expires_in_minutes: minutes === 0 ? null : minutes }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['enrollment-tokens'] }),
   })
   const server = window.location.origin.replace(':5173', ':8000')
@@ -45,7 +45,7 @@ function EnrollDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
             <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-ink-950 p-2 font-mono text-xs text-silver-200">{command}</pre>
           </div>
           <div className="flex justify-between">
-            <span className="text-xs text-silver-500">Expires {formatDateTime(create.data!.expires_at)}</span>
+            <span className="text-xs text-silver-500">{create.data!.expires_at ? `Expires ${formatDateTime(create.data!.expires_at)}` : 'Never expires'}</span>
             <Button size="sm" variant="secondary" onClick={() => { void navigator.clipboard.writeText(command); setCopied(true) }}>{copied ? <Check /> : <Copy />}{copied ? 'Copied' : 'Copy command'}</Button>
           </div>
         </div>
@@ -61,7 +61,7 @@ function EnrollDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
           </Field>
           <Field label="Valid for" htmlFor="tm">
             <Select id="tm" className="w-full" value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
-              <option value={15}>15 minutes</option><option value={60}>1 hour</option><option value={240}>4 hours</option><option value={1440}>24 hours</option>
+              <option value={15}>15 minutes</option><option value={60}>1 hour</option><option value={240}>4 hours</option><option value={1440}>24 hours</option><option value={0}>Never (indefinite)</option>
             </Select>
           </Field>
           <div className="flex justify-end"><Button type="submit" loading={create.isPending}><KeyRound />Generate token</Button></div>
@@ -87,7 +87,7 @@ function TokensCard() {
             <Td>{t.label}</Td>
             <Td><Badge tone={tone[t.state]}>{t.state}</Badge></Td>
             <Td className="text-silver-400">{relativeTime(t.created_at)}</Td>
-            <Td className="text-silver-400">{formatDateTime(t.expires_at)}</Td>
+            <Td className="text-silver-400">{t.expires_at ? formatDateTime(t.expires_at) : 'Never'}</Td>
             <Td>{t.used_by_device_id ? <Link className="text-emerald-400 hover:text-emerald-300" to={`/endpoints/${t.used_by_device_id}`}>View endpoint</Link> : '—'}</Td>
             <Td>{t.state === 'active' && <Button size="sm" variant="ghost" onClick={() => revoke.mutate(t.id)} loading={revoke.isPending && revoke.variables === t.id}>Revoke</Button>}</Td>
           </tr>

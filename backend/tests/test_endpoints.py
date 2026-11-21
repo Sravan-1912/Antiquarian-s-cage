@@ -5,6 +5,7 @@ import base64
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -154,6 +155,52 @@ def test_bad_csr_and_tokens(client, outbox):
     assert states[tok["id"]] == "used" and states[t2["id"]] == "revoked"
 
 
+def test_indefinite_enrollment_token_never_expires(client, outbox):
+    _admin(client, outbox)
+    # expires_in_minutes=None → a token that never expires ("indefinite").
+    tok = _token(client, expires_in_minutes=None)
+    assert tok["expires_at"] is None
+    assert tok["state"] == "active"
+    # Still active and usable well past any normal expiry window.
+    from app.core.database import utcnow
+    import app.services.devices as dev
+    far_future = utcnow() + timedelta(days=3650)
+    with mock.patch.object(dev, "utcnow", lambda: far_future):
+        rows = {t["id"]: t["state"] for t in client.get("/api/v1/enrollment-tokens").json()}
+        assert rows[tok["id"]] == "active"
+    assert FakeAgent(client).enroll(tok["token"]).status_code == 201
+
+
+def test_telemetry_stream_raises_edr_alert(client, outbox):
+    _admin(client, outbox)
+    agent = FakeAgent(client)
+    agent.enroll(_token(client)["token"])
+    # A malicious-looking process event + a benign one: only the malicious one becomes an alert.
+    r = agent.signed("/agent/v1/telemetry", {"events": [
+        {"type": "process_created", "data": {"name": "powershell.exe",
+         "cmdline": "powershell -nop -EncodedCommand ZQBjAGgAbwAgAHgAeAB4AHgAeAA="}},
+        {"type": "process_created", "data": {"name": "notepad.exe", "cmdline": "notepad.exe a.txt"}}]})
+    assert r.status_code == 202 and r.json()["matched"] == 1
+    edr = [a for a in client.get("/api/v1/alerts", params={"status": "open"}).json()["items"]
+           if a["rule_key"] == "edr_detection"]
+    assert edr and edr[0]["severity"] == "high"
+
+
+def test_device_risk_reflects_alerts(client, outbox):
+    _admin(client, outbox)
+    agent = FakeAgent(client)
+    agent.enroll(_token(client)["token"])
+    base = client.get(f"/api/v1/devices/{agent.device_id}/risk").json()
+    assert base["score"] >= 20 and any(f["factor"] == "compliance" for f in base["factors"])
+    # A high EDR detection should raise the score and add an "alerts" factor.
+    agent.signed("/agent/v1/telemetry", {"events": [
+        {"type": "process_created", "data": {"name": "powershell.exe", "cmdline": "powershell -EncodedCommand ZQBjAGgA"}}]})
+    after = client.get(f"/api/v1/devices/{agent.device_id}/risk").json()
+    assert after["score"] > base["score"]
+    assert any(f["factor"] == "alerts" for f in after["factors"])
+    assert after["level"] in ("medium", "high", "critical")
+
+
 def test_lifecycle_suspend_revoke_unenroll(client, outbox):
     _admin(client, outbox)
     agent = FakeAgent(client)
@@ -194,11 +241,9 @@ def test_device_rbac(client, outbox):
     _admin(client, outbox)
     agent = FakeAgent(client)
     agent.enroll(_token(client)["token"])
-    r = client.post("/api/v1/users", json={"email": "it@example.com", "full_name": "It Person", "role": "it_support"},
-                    headers=csrf(client))
-    it_id = r.json()["id"]
-    from tests.conftest import STRONG, last_token
-    client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+    from tests.conftest import invite_and_accept
+    invite_and_accept(client, outbox, "it@example.com", "it_support", full_name="It Person")
+    it_id = next(u["id"] for u in client.get("/api/v1/users").json() if u["email"] == "it@example.com")
     client.post("/api/v1/auth/logout", headers=csrf(client))
 
     login(client, "it@example.com")

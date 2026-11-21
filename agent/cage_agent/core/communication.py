@@ -94,6 +94,15 @@ class AgentClient:
     def inventory(self, key, payload: dict) -> dict:
         return self._send("/agent/v1/inventory", payload, key)
 
+    def telemetry(self, key, payload: dict) -> dict:
+        return self._send("/agent/v1/telemetry", payload, key)
+
+    def location(self, key, payload: dict) -> dict:
+        return self._send("/agent/v1/location", payload, key)
+
+    def web_activity(self, key, payload: dict) -> dict:
+        return self._send("/agent/v1/web-activity", payload, key)
+
     def renew(self, key, payload: dict) -> dict:
         return self._send("/agent/v1/certificate/renew", payload, key)
 

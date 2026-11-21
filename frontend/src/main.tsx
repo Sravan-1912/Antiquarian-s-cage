@@ -3,12 +3,15 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
+import './theme/themes.css'  // after index.css so [data-theme] overrides win in the cascade
+import './theme/controls.css' // theme-driven button/input material
+import { ThemeProvider } from '@/theme/ThemeContext'
+import { ThemesPage } from '@/modules/settings/ThemesPage'
+import { StartupLoader } from '@/components/StartupLoader'
 import { AuthProvider, useAuth } from '@/hooks/useAuth'
 import { AppShell } from '@/layouts/AppShell'
 import { Spinner } from '@/components/ui/primitives'
-import {
-  AcceptInvitePage, ForgotPasswordPage, LoginPage, MfaChallengePage, ResetPasswordPage, SetupPage, SsoErrorPage, VerifyEmailPage,
-} from '@/pages/auth/AuthPages'
+import { ChangePasswordPage, LoginPage, SetupPage, SsoErrorPage } from '@/pages/auth/AuthPages'
 import { DashboardPage } from '@/modules/dashboard/DashboardPage'
 import { EmployeesPage } from '@/modules/employees/EmployeesPage'
 import { EmployeeDetailPage } from '@/modules/employees/EmployeeDetailPage'
@@ -22,6 +25,7 @@ import { PoliciesPage } from '@/modules/policies/PoliciesPage'
 import { PolicyDetailPage } from '@/modules/policies/PolicyDetailPage'
 import { CompliancePage } from '@/modules/compliance/CompliancePage'
 import { RemoteSessionsPage } from '@/modules/remote/RemoteSessionsPage'
+import { InsightsPage } from '@/modules/insights/InsightsPage'
 import { ApplicationDetailPage, ApplicationsPage } from '@/modules/applications/ApplicationsPage'
 import { WorkspacePage } from '@/modules/workspace/WorkspacePage'
 import { AlertDetailPage, AlertsPage } from '@/modules/alerts/AlertsPage'
@@ -43,6 +47,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const loc = useLocation()
   if (loading) return <div className="grid h-full place-items-center"><Spinner /></div>
   if (!me) return <Navigate to="/login" replace state={{ from: loc.pathname }} />
+  if (me.must_change_password && loc.pathname !== '/change-password') return <Navigate to="/change-password" replace />
   return <>{children}</>
 }
 
@@ -76,17 +81,15 @@ function NotFound() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <StartupLoader />
     <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/mfa" element={<MfaChallengePage />} />
             <Route path="/setup" element={<SetupPage />} />
-            <Route path="/verify-email" element={<VerifyEmailPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/reset-password" element={<ResetPasswordPage />} />
-            <Route path="/accept-invite" element={<AcceptInvitePage />} />
+            <Route path="/change-password" element={<ChangePasswordPage />} />
             <Route path="/sso-error" element={<SsoErrorPage />} />
             <Route element={<RequireAuth><AppShell /></RequireAuth>}>
               <Route index element={<Home />} />
@@ -101,6 +104,7 @@ createRoot(document.getElementById('root')!).render(
               <Route path="applications/:id" element={<Gate perm="applications:read"><ApplicationDetailPage /></Gate>} />
               <Route path="workspace" element={<Gate perm="self:read"><WorkspacePage /></Gate>} />
               <Route path="remote-sessions" element={<GateAny perms={['devices:read', 'devices:read_assigned']}><RemoteSessionsPage /></GateAny>} />
+              <Route path="insights" element={<GateAny perms={['devices:read', 'devices:read_assigned']}><InsightsPage /></GateAny>} />
               <Route path="policies" element={<Gate perm="policies:read"><PoliciesPage /></Gate>} />
               <Route path="policies/:id" element={<Gate perm="policies:read"><PolicyDetailPage /></Gate>} />
               <Route path="compliance" element={<Gate perm="compliance:read"><CompliancePage /></Gate>} />
@@ -108,11 +112,13 @@ createRoot(document.getElementById('root')!).render(
               <Route path="audit" element={<Gate perm="audit:read"><AuditPage /></Gate>} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="account/security" element={<AccountSecurityPage />} />
+              <Route path="themes" element={<ThemesPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
         </AuthProvider>
       </BrowserRouter>
+      </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

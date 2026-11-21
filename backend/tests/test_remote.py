@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from app.security import command_signing
-from tests.conftest import STRONG, bootstrap_admin, csrf, last_token, login
+from tests.conftest import bootstrap_admin, csrf, invite_and_accept, login, step_up
 from tests.test_endpoints import FakeAgent, _token
 
 
@@ -17,10 +17,16 @@ def _setup(client, outbox) -> FakeAgent:
     return agent
 
 
-def _act(client, agent, command, params=None, password=None, reason="ticket 4711"):
-    return client.post(f"/api/v1/devices/{agent.device_id}/actions",
-                       json={"command": command, "parameters": params or {}, "reason": reason,
-                             **({"confirm_password": password} if password else {})}, headers=csrf(client))
+def _act(client, agent, command, params=None, step=None, reason="ticket 4711"):
+    body = {"command": command, "parameters": params or {}, "reason": reason}
+    if step is not None:
+        body["step_up"] = step
+    return client.post(f"/api/v1/devices/{agent.device_id}/actions", json=body, headers=csrf(client))
+
+
+def _bad_step(client):
+    """A wrong password -> sensitive-action confirmation must fail."""
+    return {"password": "not-the-real-password"}
 
 
 def _next_job(agent):
@@ -42,13 +48,14 @@ def test_actions_signed_and_reauth_for_sensitive(client, outbox):
     hist = client.get(f"/api/v1/devices/{agent.device_id}/actions").json()
     assert hist[0]["status"] == "succeeded" and hist[0]["result"]["current_state"]["uptime_seconds"] == 100
 
-    # Restart and account changes require the operator's password
+    # Restart and account changes require a fresh passkey confirmation (step-up)
+    R = "root@example.com"
     assert _act(client, agent, "device.restart", {"delay_seconds": 300}).status_code == 403
-    assert _act(client, agent, "device.restart", {"delay_seconds": 300}, password="wrong").status_code == 403
-    assert _act(client, agent, "device.restart", {"delay_seconds": 300}, password=STRONG).status_code == 201
-    assert _act(client, agent, "device.restart", {"delay_seconds": 5}, password=STRONG).status_code == 422
-    assert _act(client, agent, "account.disable", {"username": "bad\\name"}, password=STRONG).status_code == 422
-    assert _act(client, agent, "account.disable", {"username": "Guest"}, password=STRONG).status_code == 201
+    assert _act(client, agent, "device.restart", {"delay_seconds": 300}, step=_bad_step(client)).status_code == 403
+    assert _act(client, agent, "device.restart", {"delay_seconds": 300}, step=step_up(client, R)).status_code == 201
+    assert _act(client, agent, "device.restart", {"delay_seconds": 5}, step=step_up(client, R)).status_code == 422
+    assert _act(client, agent, "account.disable", {"username": "bad\\name"}, step=step_up(client, R)).status_code == 422
+    assert _act(client, agent, "account.disable", {"username": "Guest"}, step=step_up(client, R)).status_code == 201
     # Unknown / arbitrary commands are impossible
     assert _act(client, agent, "shell.exec", {"cmd": "whoami"}).status_code == 422
     denied = client.get("/api/v1/audit", params={"action": "remote.reauth_failed"}).json()
@@ -57,8 +64,8 @@ def test_actions_signed_and_reauth_for_sensitive(client, outbox):
 
 def _assist(client, agent, minutes=15):
     return client.post(f"/api/v1/devices/{agent.device_id}/assist",
-                       json={"reason": "User reported VPN issue", "max_minutes": minutes, "confirm_password": STRONG},
-                       headers=csrf(client))
+                       json={"reason": "User reported VPN issue", "max_minutes": minutes,
+                             "step_up": step_up(client, "root@example.com")}, headers=csrf(client))
 
 
 def test_session_consent_granted_then_user_ends(client, outbox):
@@ -98,6 +105,107 @@ def test_session_denied_and_admin_termination(client, outbox):
     agent.signed(f"/agent/v1/jobs/{end['job_id']}/result", {"status": "succeeded"})
     s = client.get(f"/api/v1/remote-sessions/{s['id']}").json()
     assert s["status"] == "ended" and s["ended_by"] == "administrator"
+
+
+def test_rdp_unattended_session_lifecycle(client, outbox):
+    agent = _setup(client, outbox)
+    # Unattended RDP: no password step-up and no consent flag, but the session still carries a mandatory banner on
+    # the endpoint (enforced agent-side: it fails closed if the banner cannot be shown).
+    r = client.post(f"/api/v1/devices/{agent.device_id}/rdp",
+                    json={"reason": "Server maintenance window", "max_minutes": 20}, headers=csrf(client))
+    assert r.status_code == 201, r.text
+    s = r.json()
+    assert s["mode"] == "rdp" and s["require_consent"] is False and s["status"] == "requested"
+    assert client.post(f"/api/v1/devices/{agent.device_id}/rdp", json={"reason": "again now", "max_minutes": 20},
+                       headers=csrf(client)).status_code == 409  # one open session per endpoint
+
+    env = _next_job(agent)
+    assert env["command"] == "rdp.start" and env["parameters"]["requested_by"] == "root@example.com"
+    # Endpoint enabled RDP + showed the banner, and reports the address to connect to.
+    agent.signed(f"/agent/v1/jobs/{env['job_id']}/result",
+                 {"status": "succeeded", "current_state": {"connection": "192.168.1.20:3389"}})
+    s = client.get(f"/api/v1/remote-sessions/{s['id']}").json()
+    assert s["status"] == "active" and s["connection"] == "192.168.1.20:3389" and s["expires_at"]
+
+    r = client.post(f"/api/v1/remote-sessions/{s['id']}/terminate", json={"reason": "done"}, headers=csrf(client))
+    assert r.json()["status"] == "ending"
+    end = _next_job(agent)
+    assert end["command"] == "rdp.end" and end["parameters"]["session_id"] == s["id"]
+    agent.signed(f"/agent/v1/jobs/{end['job_id']}/result", {"status": "succeeded"})
+    assert client.get(f"/api/v1/remote-sessions/{s['id']}").json()["status"] == "ended"
+    actions = {a["action"] for a in client.get("/api/v1/audit", params={"action": "remote.rdp"}).json()["items"]}
+    assert {"remote.rdp_requested", "remote.rdp_started"} <= actions
+
+
+def test_shell_session_lifecycle_and_elevated_flag(client, outbox):
+    agent = _setup(client, outbox)
+    # Live-response shell: break-glass arbitrary execution, gated by RBAC + banner + audit.
+    r = client.post(f"/api/v1/devices/{agent.device_id}/shell",
+                    json={"reason": "Investigate suspicious process", "max_minutes": 15, "elevated": True},
+                    headers=csrf(client))
+    assert r.status_code == 201, r.text
+    s = r.json()
+    assert s["mode"] == "shell" and s["status"] == "requested"
+    # One open remote session per endpoint (shared across rdp/assist/shell).
+    assert client.post(f"/api/v1/devices/{agent.device_id}/shell", json={"reason": "again please", "max_minutes": 10},
+                       headers=csrf(client)).status_code == 409
+
+    env = _next_job(agent)
+    assert env["command"] == "shell.start" and env["parameters"]["elevated"] is True
+    assert env["parameters"]["tunnel_token"] and env["parameters"]["session_id"] == s["id"]
+    agent.signed(f"/agent/v1/jobs/{env['job_id']}/result", {"status": "succeeded"})
+    assert client.get(f"/api/v1/remote-sessions/{s['id']}").json()["status"] == "active"
+
+    # Operator attaches over the relay; the connect payload carries the device key for the E2E handshake.
+    conn = client.post(f"/api/v1/remote-sessions/{s['id']}/shell-connect", headers=csrf(client))
+    assert conn.status_code == 200 and conn.json()["operator_token"] and conn.json()["endpoint_public_key"]
+
+    client.post(f"/api/v1/remote-sessions/{s['id']}/terminate", json={"reason": "done"}, headers=csrf(client))
+    end = _next_job(agent)
+    assert end["command"] == "shell.end" and end["parameters"]["session_id"] == s["id"]
+    agent.signed(f"/agent/v1/jobs/{end['job_id']}/result", {"status": "succeeded"})
+    assert client.get(f"/api/v1/remote-sessions/{s['id']}").json()["status"] == "ended"
+    acts = {a["action"] for a in client.get("/api/v1/audit", params={"action": "remote.shell"}).json()["items"]}
+    assert "remote.shell_requested" in acts
+
+
+def test_isolate_and_release_contain_endpoint(client, outbox):
+    agent = _setup(client, outbox)
+    R = "root@example.com"
+    # Network isolation is sensitive (password step-up) and gated by devices:isolate (root/super_admin has it).
+    assert _act(client, agent, "device.isolate").status_code == 403  # no step-up
+    assert _act(client, agent, "device.isolate", step=step_up(client, R)).status_code == 201
+    env = _next_job(agent)
+    assert env["command"] == "device.isolate"
+    # server_host is injected server-side so the broker keeps the agent→backend channel open (releasable).
+    assert env["parameters"]["server_host"]
+    agent.signed(f"/agent/v1/jobs/{env['job_id']}/result", {"status": "succeeded", "current_state": {"isolated": True}})
+    assert _act(client, agent, "device.release", step=step_up(client, R)).status_code == 201
+    assert _next_job(agent)["command"] == "device.release"
+
+
+def test_rdp_relay_pipes_bytes_and_rejects_bad_token(client, outbox):
+    from app.services.rdp_relay import mint_token
+    sid = "11111111-1111-1111-1111-111111111111"
+    et, ot = mint_token(sid, "endpoint"), mint_token(sid, "operator")
+
+    # A forged/mismatched token is refused before the socket is accepted.
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(f"/agent/v1/rdp/tunnel?session={sid}&token=forged"):
+            pass
+    with pytest.raises(WebSocketDisconnect):  # operator token cannot be used on the endpoint side
+        with client.websocket_connect(f"/agent/v1/rdp/tunnel?session={sid}&token={ot}"):
+            pass
+
+    # Valid tokens on both sides: the relay copies bytes each way between the two sockets.
+    with client.websocket_connect(f"/agent/v1/rdp/tunnel?session={sid}&token={et}") as endpoint, \
+         client.websocket_connect(f"/api/v1/rdp/tunnel?session={sid}&token={ot}") as operator:
+        operator.send_bytes(b"client-hello (RDP)")
+        assert endpoint.receive_bytes() == b"client-hello (RDP)"
+        endpoint.send_bytes(b"server-hello (RDP)")
+        assert operator.receive_bytes() == b"server-hello (RDP)"
 
 
 def test_session_expiry_and_offline_and_cancel(client, outbox):
@@ -144,8 +252,7 @@ def test_consent_policy_and_rbac(client, outbox):
     assert _next_job(agent)["parameters"]["require_consent"] is False
 
     for email, role in (("sa@example.com", "security_analyst"), ("it@example.com", "it_support")):
-        client.post("/api/v1/users", json={"email": email, "full_name": "Some Body", "role": role}, headers=csrf(client))
-        client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+        invite_and_accept(client, outbox, email, role)
     it_id = next(u["id"] for u in client.get("/api/v1/users").json() if u["email"] == "it@example.com")
     client.patch(f"/api/v1/devices/{agent.device_id}", json={"support_owner_id": it_id}, headers=csrf(client))
     client.post("/api/v1/auth/logout", headers=csrf(client))

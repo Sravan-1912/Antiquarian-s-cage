@@ -90,5 +90,8 @@ export function describeError(e: unknown): string {
     if (e.fieldErrors.length) return e.fieldErrors.map((f) => `${f.loc.slice(1).join('.')}: ${f.msg}`).join('; ')
     return e.message
   }
+  // Surface the actual reason for non-API failures too (e.g. the desktop-app RDP bridge throwing a specific
+  // Error), instead of masking every one with the generic fallback.
+  if (e instanceof Error && e.message) return e.message
   return 'Unexpected error. Check your connection and try again.'
 }

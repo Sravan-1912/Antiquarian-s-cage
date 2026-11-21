@@ -37,7 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--allow-insecure-localhost", action="store_true",
                    help="Development only: permit http:// to localhost")
     e.add_argument("--service-account", help="Principal granted access to the key file (e.g. 'NT SERVICE\\CageAgent')")
-    sub.add_parser("run")
+    r = sub.add_parser("run")
+    r.add_argument("--unlock-relay", choices=["on", "off", "dev"], default="on",
+                   help="Lock-screen phone sign-in relay. 'dev' also admits the current user (testing only).")
     sub.add_parser("status")
     args = p.parse_args(argv)
 
@@ -60,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "run":
             try:
-                return agent.Agent(paths).run()
+                return agent.Agent(paths, unlock_relay=args.unlock_relay).run()
             except KeyboardInterrupt:
                 return 0
     except (configuration.ConfigError, AuthRejected, ServerError, PermissionError) as exc:

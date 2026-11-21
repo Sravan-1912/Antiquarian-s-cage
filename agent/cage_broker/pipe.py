@@ -15,14 +15,15 @@ class BrokerUnavailable(Exception):
     pass
 
 
-def _security_attributes(extra_sids: list):
+def _security_attributes(extra_sids: list, include_admins: bool = True):
     import ntsecuritycon as con
     import win32security as sec
     sa = sec.SECURITY_ATTRIBUTES()
     sd = sec.SECURITY_DESCRIPTOR()
     dacl = sec.ACL()
     rights = con.GENERIC_READ | con.GENERIC_WRITE
-    for sid in [sec.ConvertStringSidToSid("S-1-5-18"), sec.ConvertStringSidToSid("S-1-5-32-544"), *extra_sids]:
+    base = [sec.ConvertStringSidToSid("S-1-5-18")] + ([sec.ConvertStringSidToSid("S-1-5-32-544")] if include_admins else [])
+    for sid in [*base, *extra_sids]:
         dacl.AddAccessAllowedAce(sec.ACL_REVISION, rights, sid)
     sd.SetSecurityDescriptorDacl(1, dacl, 0)
     sa.SECURITY_DESCRIPTOR = sd
@@ -36,6 +37,11 @@ def sid_for(account: str):
     return sec.LookupAccountName(None, account)[0]
 
 
+def sec_string(sid) -> str:
+    import win32security as sec
+    return sec.ConvertSidToStringSid(sid)
+
+
 def current_user_sid():
     import win32api
     import win32con
@@ -44,11 +50,12 @@ def current_user_sid():
     return sec.GetTokenInformation(tok, sec.TokenUser)[0]
 
 
-def serve(handler, allowed_sids: list, stop: threading.Event, name: str = PIPE_NAME) -> None:
+def serve(handler, allowed_sids: list, stop: threading.Event, name: str = PIPE_NAME, *,
+          include_admins: bool = True, pass_handle: bool = False) -> None:
     import pywintypes
     import win32file
     import win32pipe
-    sa = _security_attributes(allowed_sids)
+    sa = _security_attributes(allowed_sids, include_admins)
     while not stop.is_set():
         h = win32pipe.CreateNamedPipe(
             name, win32pipe.PIPE_ACCESS_DUPLEX,
@@ -61,7 +68,7 @@ def serve(handler, allowed_sids: list, stop: threading.Event, name: str = PIPE_N
             _, data = win32file.ReadFile(h, MAX_MESSAGE)
             try:
                 request = json.loads(data.decode("utf-8"))
-                response = handler(request)
+                response = handler(request, h) if pass_handle else handler(request)
             except (ValueError, UnicodeDecodeError):
                 response = {"status": "rejected", "detail": "broker: malformed request"}
             win32file.WriteFile(h, json.dumps(response).encode("utf-8"))

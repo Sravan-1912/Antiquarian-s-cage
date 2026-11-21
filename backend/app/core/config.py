@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -10,11 +11,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # The desktop app sets CAGE_ENV_FILE="" so a stray .env next to the exe can never override its config.
+    model_config = SettingsConfigDict(env_file=os.environ.get("CAGE_ENV_FILE", ".env") or None,
+                                      env_file_encoding="utf-8", extra="ignore")
 
-    environment: Literal["development", "test", "production"] = "development"
+    environment: Literal["development", "test", "production", "desktop"] = "development"
     app_name: str = "Antiquarian's Cage"
     public_base_url: str = "http://localhost:5173"
+    # When set to the built frontend's directory, the API also serves the console SPA on the same origin (desktop app /
+    # single-container deploys). Unset in normal dev, where Vite serves it.
+    spa_dir: str | None = None
+    # Address phones use to reach the API (pairing QR). Defaults to PUBLIC_BASE_URL; in development set it to this
+    # machine's LAN address (e.g. http://192.168.1.20:8000) because a phone cannot reach "localhost".
+    phone_api_base_url: str | None = None
+    # Optional: a Google Geolocation API key enables accurate Wi-Fi positioning for endpoints. When unset, endpoint
+    # location falls back to approximate IP-based geolocation. Either way the source + accuracy radius are shown.
+    google_geolocation_api_key: str | None = None
     expose_api_docs: bool = False
 
     database_url: str
@@ -98,6 +110,17 @@ class Settings(BaseSettings):
                 raise ValueError("DEVICE_CA_KEY_PASSPHRASE (>=24 chars) is required in production")
             if not self.agent_require_mtls:
                 raise ValueError("AGENT_REQUIRE_MTLS must be true in production")
+            if not self.public_base_url.startswith("https://"):
+                raise ValueError("PUBLIC_BASE_URL must be https:// in production")
+            bad = [o for o in self.allowed_origins if not o.startswith("https://") or "localhost" in o or "127.0.0.1" in o]
+            if bad or not self.allowed_origins:
+                raise ValueError(f"ALLOWED_ORIGINS must be https and not localhost in production (got {bad or 'none'})")
+            if self.database_url.startswith("sqlite"):
+                raise ValueError("SQLite is not supported in production; use PostgreSQL")
+            from urllib.parse import urlparse
+            api_user = urlparse(self.database_url).username
+            if self.migration_database_url and api_user and api_user == urlparse(self.migration_database_url).username:
+                raise ValueError("the API must not connect as the schema owner; use the least-privilege role in DATABASE_URL")
         if not self.device_ca_key_passphrase:
             # Development/test only: derive a passphrase so the auto-created dev CA key is never stored in clear.
             import hashlib

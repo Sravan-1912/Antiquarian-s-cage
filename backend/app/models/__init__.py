@@ -18,11 +18,15 @@ from app.models.endpoints import (
     DeviceEvent,
     DeviceHeartbeat,
     DeviceInventory,
+    DeviceLocation,
+    DeviceSiteVisit,
     EnrollmentToken,
 )
 from app.models.operations import AuditAnchor, AuditLog, Notification
+from app.models.billing import Subscription, SubscriptionPlan
+from app.models.phone import PhoneAuthenticator, PhoneLoginRequest, PhonePairing, WindowsUnlockKey
 from app.models.remote import RemoteSession
-from app.models.secops import AlertEvent, EmailOutbox, NotificationPreference, SecurityAlert
+from app.models.secops import AlertEvent, EmailOutbox, NotificationPreference, SecurityAlert, SiemDelivery, SiemDestination
 from app.models.sso import (
     Application,
     ApplicationAssignment,
@@ -46,8 +50,8 @@ __all__ = [
     "Base", "Organization", "Permission", "Role", "RolePermission", "User", "UserRole", "UserSession",
     "AuthToken", "AuthenticationEvent", "Employee", "EmployeeEvent", "AuditLog", "AuditAnchor", "Notification",
     "Device", "EnrollmentToken", "DeviceCertificate", "AgentRequestNonce", "DeviceHeartbeat", "DeviceInventory",
-    "DeviceEvent", "AgentVersion", "EndpointPolicy", "PolicyRevision", "PolicyAssignment", "CommandJob",
+    "DeviceEvent", "DeviceLocation", "DeviceSiteVisit", "AgentVersion", "EndpointPolicy", "PolicyRevision", "PolicyAssignment", "CommandJob",
     "PolicyDeployment", "ComplianceCheckSetting", "ComplianceEvaluation", "ComplianceResult",
     "RemoteSession", "Application", "ApplicationAssignment", "OIDCAuthorizationCode", "WebAuthnChallenge",
-    "WebAuthnCredential", "SecurityAlert", "AlertEvent", "NotificationPreference", "EmailOutbox",
+    "WebAuthnCredential", "SecurityAlert", "AlertEvent", "NotificationPreference", "EmailOutbox", "SiemDestination", "SiemDelivery", "PhoneAuthenticator", "PhoneLoginRequest", "PhonePairing", "WindowsUnlockKey", "Subscription", "SubscriptionPlan",
 ]

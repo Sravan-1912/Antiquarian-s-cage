@@ -7,11 +7,25 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-DEFAULT_DATA_DIR = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AntiquariansCage"
+
+def _default_data_dir() -> Path:
+    if sys.platform == "win32":
+        return Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AntiquariansCage"
+    # POSIX: a system path when running as root (service), otherwise the invoking user's config dir.
+    if os.geteuid() == 0:  # type: ignore[attr-defined]
+        return Path("/var/lib/cage-agent")
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return Path(base) / "cage-agent"
+
+
+DEFAULT_DATA_DIR = _default_data_dir()
+# Private-key filename differs by protection scheme (DPAPI blob vs AES-GCM blob) so a wrong-platform file is obvious.
+KEY_FILENAME = "device.key.dpapi" if sys.platform == "win32" else "device.key.enc"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
@@ -44,7 +58,7 @@ class AgentPaths:
     def __init__(self, data_dir: Path):
         self.root = data_dir
         self.config = data_dir / "config.json"
-        self.key = data_dir / "device.key.dpapi"
+        self.key = data_dir / KEY_FILENAME
         self.cert = data_dir / "device.crt"
         self.ca = data_dir / "device-ca.crt"
         self.logs = data_dir / "logs"

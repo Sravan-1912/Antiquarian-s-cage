@@ -38,9 +38,22 @@ ADMINS = ("Get-LocalGroupMember -SID 'S-1-5-32-544' | ForEach-Object { [pscustom
           "source = [string]$_.PrincipalSource } }")
 
 
+def _top_processes(n: int = 8) -> list[dict]:
+    procs = []
+    for pr in psutil.process_iter(["pid", "name", "memory_percent"]):
+        try:
+            procs.append(pr.info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    top = sorted(procs, key=lambda x: x.get("memory_percent") or 0, reverse=True)[:n]
+    return [{"pid": p["pid"], "name": (p.get("name") or "?")[:48], "mem_percent": round(p.get("memory_percent") or 0, 1)}
+            for p in top]
+
+
 def inspect(_: dict) -> Outcome:
     vm = psutil.virtual_memory()
     data = {
+        "top_processes": _top_processes(),
         "uptime_seconds": int(time.time() - psutil.boot_time()),
         "cpu_percent": psutil.cpu_percent(interval=1.0),
         "memory_percent": vm.percent,
@@ -111,6 +124,31 @@ def restart_cancel(_: dict) -> Outcome:
     return Outcome("succeeded", "Scheduled restart cancelled")
 
 
+def shutdown(p: dict) -> Outcome:
+    delay, msg = int(p["delay_seconds"]), str(p["message"])
+    r = _shutdown(["/s", "/t", str(delay), "/c", msg[:200], "/d", "p:4:1"])  # planned: application maintenance
+    if r.returncode == 1190:  # a shutdown is already scheduled
+        return Outcome("needs_attention", "A restart/shutdown is already scheduled on this device")
+    if r.returncode != 0:
+        return Outcome("failed", f"shutdown.exe exit {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}")
+    return Outcome("succeeded", f"Power-off scheduled in {delay} s with an on-screen warning; cancellable", {},
+                   {"shutdown_in_seconds": delay})
+
+
+def logoff(_: dict) -> Outcome:
+    import win32ts
+    console = win32ts.WTSGetActiveConsoleSessionId()
+    if console == 0xFFFFFFFF:
+        return Outcome("needs_attention", "No interactive user session to log off")
+    try:
+        win32ts.WTSLogoffSession(win32ts.WTS_CURRENT_SERVER_HANDLE, console, False)
+    except Exception as exc:  # pywintypes.error
+        if getattr(exc, "winerror", None) == 5:
+            raise ElevationRequired("logging off another session requires SYSTEM/administrator") from exc
+        raise
+    return Outcome("succeeded", f"Logged off console session {console}")
+
+
 # ---------------------------------------------------------------------------------------------- accounts
 def _accounts() -> tuple[list[dict], set[str]]:
     users = run(LOCAL_USERS) or []
@@ -178,8 +216,127 @@ def close_quick_assist(_: dict) -> Outcome:
     return Outcome("succeeded", "Quick Assist closed")
 
 
+# ------------------------------------------------------------------------------------------- remote desktop (RDP)
+def _lan_ip() -> str:
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))  # no packet is sent; just picks the outbound interface
+        return s.getsockname()[0]
+    except OSError:
+        return socket.gethostbyname(socket.gethostname())
+    finally:
+        s.close()
+
+
+def _rdp_listener_up(timeout: float = 8.0) -> bool:
+    """True once something is listening on 127.0.0.1:3389. On Pro/Enterprise the listener starts within a couple of
+    seconds of enabling RDP; on Windows Home there is no RDP host, so it never comes up."""
+    import socket
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex(("127.0.0.1", 3389)) == 0:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _windows_edition_hint() -> str:
+    try:
+        import platform
+        ed = (platform.win32_edition() or "")
+    except Exception:  # noqa: BLE001
+        ed = ""
+    # Home editions report "Core" / "CoreSingleLanguage" / "CoreN"; they cannot host Remote Desktop.
+    return " (this endpoint runs a Windows Home edition, which cannot host Remote Desktop)" \
+        if ed.lower().startswith("core") else ""
+
+
+def rdp_enable(_: dict) -> Outcome:
+    """Broker-only: turn on native Windows Remote Desktop and open the firewall for the session. The agent only calls
+    this once it is already showing the mandatory on-screen banner, so RDP is never enabled silently."""
+    subprocess.run([exe("reg.exe"), "add", r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
+                    "/v", "fDenyTSConnections", "/t", "REG_DWORD", "/d", "0", "/f"],
+                   capture_output=True, creationflags=NO_WINDOW, check=True)
+    subprocess.run([exe("netsh.exe"), "advfirewall", "firewall", "set", "rule", "group=remote desktop",
+                    "new", "enable=Yes"], capture_output=True, creationflags=NO_WINDOW)
+    # Verify a Remote Desktop host actually came up. On Windows Home it never will, so fail with a clear,
+    # actionable message instead of letting the operator's mstsc hit a cryptic "can't connect" dialog later.
+    if not _rdp_listener_up():
+        rdp_disable(_)  # revert the registry/firewall changes we just made — the session did not start
+        return Outcome("failed",
+                       "Remote Desktop could not be enabled on this endpoint" + _windows_edition_hint() +
+                       ". Use Remote Assistance instead.",
+                       {"rdp_enabled": False}, {"rdp_enabled": False})
+    return Outcome("succeeded", "Remote Desktop enabled for this session", {"rdp_enabled": False},
+                   {"rdp_enabled": True, "connection": f"{_lan_ip()}:3389"})
+
+
+def rdp_disable(_: dict) -> Outcome:
+    """Broker-only: turn Remote Desktop back off and close the firewall at the end of the session."""
+    subprocess.run([exe("reg.exe"), "add", r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
+                    "/v", "fDenyTSConnections", "/t", "REG_DWORD", "/d", "1", "/f"],
+                   capture_output=True, creationflags=NO_WINDOW, check=True)
+    subprocess.run([exe("netsh.exe"), "advfirewall", "firewall", "set", "rule", "group=remote desktop",
+                    "new", "enable=No"], capture_output=True, creationflags=NO_WINDOW)
+    return Outcome("succeeded", "Remote Desktop disabled", {"rdp_enabled": True}, {"rdp_enabled": False})
+
+
+_ISO_RULES = ("CageIsolation-Backend", "CageIsolation-DNS", "CageIsolation-DNS-TCP", "CageIsolation-DHCP")
+
+
+def isolate(p: dict) -> Outcome:
+    """Broker-only: network-isolate (contain) the endpoint — block all traffic EXCEPT the agent→backend management
+    channel (so the endpoint can still be released) + DNS/DHCP. Reversible with release()."""
+    host = str(p.get("server_host") or "").strip()
+    ips: set[str] = set()
+    if host:
+        import socket
+        try:
+            ips = {ai[4][0] for ai in socket.getaddrinfo(host, None)}
+        except OSError:
+            ips = set()
+    if host and not ips:
+        # Refuse rather than cut the endpoint off from the only channel that can release it.
+        return Outcome("failed", f"Could not resolve the backend host ({host}); not isolating (would cut off management).",
+                       {"isolated": False}, {"isolated": False})
+    subprocess.run([exe("netsh.exe"), "advfirewall", "set", "allprofiles", "firewallpolicy",
+                    "blockinbound,blockoutbound"], capture_output=True, creationflags=NO_WINDOW, check=True)
+
+    def allow(name: str, *args: str) -> None:
+        subprocess.run([exe("netsh.exe"), "advfirewall", "firewall", "add", "rule", f"name={name}",
+                        "dir=out", "action=allow", *args], capture_output=True, creationflags=NO_WINDOW)
+
+    if ips:
+        allow("CageIsolation-Backend", f"remoteip={','.join(sorted(ips))}")
+    allow("CageIsolation-DNS", "protocol=UDP", "remoteport=53")
+    allow("CageIsolation-DNS-TCP", "protocol=TCP", "remoteport=53")
+    allow("CageIsolation-DHCP", "protocol=UDP", "remoteport=67-68")
+    return Outcome("succeeded", f"Endpoint isolated — network locked to the management channel ({host or 'backend'})",
+                   {"isolated": False}, {"isolated": True, "allowed_ips": sorted(ips)})
+
+
+def release(_: dict) -> Outcome:
+    """Broker-only: lift network isolation — restore the default firewall policy and remove the isolation allow-rules."""
+    subprocess.run([exe("netsh.exe"), "advfirewall", "set", "allprofiles", "firewallpolicy",
+                    "blockinbound,allowoutbound"], capture_output=True, creationflags=NO_WINDOW, check=True)
+    for name in _ISO_RULES:
+        subprocess.run([exe("netsh.exe"), "advfirewall", "firewall", "delete", "rule", f"name={name}"],
+                       capture_output=True, creationflags=NO_WINDOW)
+    return Outcome("succeeded", "Endpoint released from isolation", {"isolated": True}, {"isolated": False})
+
+
 HANDLERS = {
     "device.inspect": inspect, "device.lock": lock, "device.restart": restart, "device.restart_cancel": restart_cancel,
+    "device.shutdown": shutdown, "device.logoff": logoff,
     "account.disable": account_disable, "account.enable": account_enable, "account.remove_admin": account_remove_admin,
-    "assist.end": close_quick_assist,
+    "device.isolate": isolate, "device.release": release,
+    "assist.end": close_quick_assist, "rdp.start": rdp_enable, "rdp.end": rdp_disable,
 }
+
+# On Linux the POSIX implementations replace the whole handler set (see remote/linux_actions.py).
+if sys.platform.startswith("linux"):
+    from cage_agent.remote import linux_actions
+    HANDLERS = linux_actions.HANDLERS

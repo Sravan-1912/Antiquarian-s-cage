@@ -4,16 +4,20 @@ Full threat model and trust boundaries: `documentation/03-security-and-windows.m
 
 ## Implemented controls (Phase 1)
 
-* **Passwords** — Argon2id (m=64 MiB, t=3, p=4), transparent rehash on login, policy: ≥12 chars, 3 of 4 classes,
-  common-password and name/email checks. Timing equalised for unknown accounts.
+* **Sign-in — passkeys only** — WebAuthn with user verification required (no passwords, no TOTP). A passkey already
+  combines possession (the authenticator) with a biometric/PIN, so it is MFA on its own. Sign-in is usernameless;
+  py_webauthn verifies the assertion against the stored public key; sign counts detect cloned authenticators.
+  There is no password hash, TOTP secret, or any shared secret to steal, phish, or reset.
+* **Passwordless onboarding & recovery** — bootstrap, invitation and admin-issued recovery each mint a single-use,
+  short-lived token that drives a passkey registration ceremony; the token is consumed on success and the account is
+  activated and signed in. Recovery revokes the user's old passkeys. A server-only break-glass CLI
+  (`python -m app.recover <email>`, needs host DB access) mints a recovery link for a sole Super Admin who lost every passkey.
 * **Sessions** — 256-bit opaque tokens in `HttpOnly; SameSite=Strict; Secure` cookies; only SHA-256 hashes stored.
-  Idle (30 min) and absolute (12 h) expiry; revoked on logout, password change/reset, role change, disable, suspension.
+  Idle (30 min) and absolute (12 h) expiry; revoked on logout, passkey revocation, role change, disable, suspension.
 * **CSRF** — double-submit token (`cage_csrf` cookie ↔ `X-CSRF-Token` header, compared against a stored hash)
   plus Origin allow-list for state-changing requests.
-* **MFA** — TOTP secrets encrypted with AES-256-GCM, bound to the user ID as associated data; time-step replay blocked;
-  pending-MFA sessions cannot reach any API other than MFA verification and logout.
-* **Brute force** — per-IP fixed-window limits (Redis in production, fail-closed), per-account lockout after 5 failures
-  (also at the MFA step), uniform 401 for unknown user vs bad password.
+* **Brute force** — per-IP fixed-window limits (Redis in production, fail-closed) and per-account lockout after repeated
+  failed passkey assertions; a failed sign-in still feeds the security-operations detection rules.
 * **Authorization** — permission strings resolved from DB-backed roles; every router declares its permission;
   tenant (organisation) scoping on every query; denials written to the audit log.
 * **Input/output** — Pydantic validation (control characters rejected), ORM parameterisation, validation errors never
@@ -29,8 +33,12 @@ Each record stores `hash = SHA-256(prev_hash ‖ canonical(record))` and `mac = 
 
 * Detects modification, insertion or deletion **within** the chain. Without the HMAC key an attacker with DB write
   access cannot recompute a valid chain.
-* **Does not** detect truncation of the newest records on its own. Mitigation: periodically export the verified head
-  (`seq`, `hash`) to an external write-once store (planned Phase 7) and compare.
+* Truncation of the newest records and wholesale re-chaining are detected by **anchors** (Phase 7): the chain head is
+  signed with a dedicated Ed25519 key hourly and on demand, stored append-only in `audit_anchors` and appended to an
+  external file (`AUDIT_ANCHOR_DIR`). Verification compares every anchor with the live chain; the scheduler re-checks
+  the latest anchor every cycle and raises a critical alert. The external file is only as strong as its storage: put
+  it on WORM/remote storage the API host cannot rewrite. A failed external write raises an alert (never silent).
+  `infrastructure/scripts/verify_audit_anchors.py` verifies the file offline with the public key.
 * An attacker who holds both DB write access **and** `AUDIT_HMAC_KEY` can forge history. Keep the key in a secret
   manager/HSM, separate from the database host and from `DATA_ENCRYPTION_KEY`; rotate with a documented re-anchor.
 * SQLite (development only) has no trigger protection.
@@ -74,8 +82,8 @@ Each record stores `hash = SHA-256(prev_hash ‖ canonical(record))` and `mac = 
 
 * Only allowlisted actions exist (inspect, lock, restart/cancel, local account disable/enable/demote, assistance
   start/end). Each is signed, single-use, expires in 10–60 minutes and is schema-validated by server, agent and broker.
-* Restart, account changes and assistance requests require the operator to re-enter their password; failures are
-  audited (`remote.reauth_failed`). Every action carries a reason, signed into the job and recorded in the audit log.
+* Restart, account changes and assistance requests require a fresh passkey confirmation (step-up assertion) from the
+  operator; failures are audited (`remote.reauth_failed`). Every action carries a reason, signed into the job and recorded in the audit log.
 * The broker refuses to disable or demote the last enabled local administrator.
 * Remote assistance: consent by default (only a Super Admin can change it organisation-wide, audited), a permanent
   on-screen indicator, the user can always end the session, hard expiry on both sides, no hidden capture. Screen
@@ -89,7 +97,8 @@ Each record stores `hash = SHA-256(prev_hash ‖ canonical(record))` and `mac = 
   challenges, sign-counter clone detection; only public keys are stored — no biometric data ever reaches the server.
 * OIDC provider: authorization code + mandatory PKCE S256, exact redirect-URI match (unknown client/redirect errors
   are never redirected), hashed single-use 60-second codes, RS256 tokens with a dedicated signing key (separate from
-  device CA, command and audit keys), hashed client secrets shown once, per-app MFA step-up based on RFC 8176 `amr`.
+  device CA, command and audit keys), hashed client secrets shown once, per-app MFA step-up based on RFC 8176 `amr`
+  (a passkey session already carries `mfa`, so it satisfies an app's MFA requirement without a second factor).
 * Access is re-checked at authorize, token and userinfo; revoking an assignment or offboarding an employee takes
   effect immediately for userinfo. Issued ID tokens remain valid until expiry (5 minutes) — relying parties should keep
   their own sessions short or re-validate.
@@ -103,9 +112,23 @@ Each record stores `hash = SHA-256(prev_hash ‖ canonical(record))` and `mac = 
 * User-session helper launch when the agent runs as a service (remote assistance currently fails closed there).
 * Compliance evidence is endpoint-reported; no hardware-backed attestation yet.
 * Agent binary signing and secure self-update — not implemented (build script notes signtool requirement).
-* WebAuthn/passkeys and OIDC provider (Phase 5) — not implemented.
-* "Recent MFA" step-up for sensitive actions, PostgreSQL row-level security, key rotation tooling (Phase 7).
+* PostgreSQL row-level security, key rotation tooling. (Fresh-passkey step-up for sensitive remote actions is implemented.)
+* Agent subprocesses use absolute System32 paths (GetSystemDirectoryW) to prevent binary planting (Phase 7 audit).
 * Locked accounts return HTTP 423, which reveals that the account exists; accepted trade-off for operator clarity.
+
+## Phase 7 security review (2026-11-06)
+
+* Dependency audit: `pip-audit` (backend, agent) and `npm audit --omit=dev` — no known vulnerabilities.
+* Bandit (backend, agent, broker): remaining findings are accepted — subprocess use in the agent (allowlisted tools,
+  absolute paths, no shell), retry jitter using `random`, two false-positive "hardcoded password" strings.
+  Security-relevant `assert`s were replaced with explicit checks (asserts vanish under `python -O`).
+* Secrets scan: none committed; real values only in gitignored `backend/.env` and `backend/var/`. `.dockerignore`
+  keeps `.env`, keys and local data out of image build contexts.
+* Production guards refuse: insecure cookies, missing Redis/SMTP, short CA passphrase, mTLS off, non-https base URL or
+  origins, SQLite, the API connecting as the schema owner, identical data/audit keys. `python -m app.preflight`
+  checks the live deployment (role privileges, triggers, migrations, keys, anchor storage, Redis, SMTP).
+* Backups are AES-256-GCM encrypted (scrypt-derived key), checksummed per member, and restore only into a new
+  database; a wrong passphrase or a modified bundle is refused.
 
 ## Reporting
 

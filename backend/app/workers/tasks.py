@@ -38,6 +38,12 @@ def run_cycle(db: Session, *, purge: bool = False) -> dict:
         db.rollback()
         log.exception("email delivery failed")
     try:
+        from app.services import siem
+        out["siem"] = siem.deliver_outbox(db)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        log.exception("SIEM egress failed")
+    try:
         from app.services import audit_anchor
         out["audit_anchors"] = audit_anchor.cycle(db)
         db.commit()

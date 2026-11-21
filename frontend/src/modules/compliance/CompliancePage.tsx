@@ -7,10 +7,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
 import type { ComplianceCheckDef, ComplianceDeviceRow, ComplianceSummary, Severity } from '@/types/api'
 import { relativeTime } from '@/utils/format'
+import { chartAxis, chartTooltip, useChartPalette } from '@/theme/useChartPalette'
 import { SeverityBadge, StateBadge } from './shared'
-
-const AXIS = { stroke: '#5f646b', fontSize: 11, tickLine: false, axisLine: false } as const
-const TOOLTIP = { contentStyle: { background: '#0d0e10', border: '1px solid #2b2f34', borderRadius: 6, fontSize: 12, color: '#d8dbde' }, labelStyle: { color: '#9a9ea4' } }
 
 function Stat({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
   return <Card className="px-4 py-3.5"><div className="text-xs text-silver-500">{label}</div><div className={`mt-2 text-2xl font-semibold tabular-nums ${tone ?? 'text-silver-50'}`}>{value}</div></Card>
@@ -50,6 +48,8 @@ function ChecksSettings() {
 
 export function CompliancePage() {
   const nav = useNavigate()
+  const cp = useChartPalette()
+  const AXIS = chartAxis(cp), TOOLTIP = chartTooltip(cp)
   const summary = useQuery({ queryKey: ['compliance', 'summary'], queryFn: () => api.get<ComplianceSummary>('/compliance/summary'), refetchInterval: 60_000 })
   const devices = useQuery({ queryKey: ['compliance', 'devices'], queryFn: () => api.get<ComplianceDeviceRow[]>('/compliance/devices'), refetchInterval: 60_000 })
   if (summary.isLoading) return <div className="grid h-64 place-items-center"><Spinner /></div>
@@ -76,12 +76,12 @@ export function CompliancePage() {
             {!hasHistory ? <EmptyState icon={ClipboardCheck} title="No evaluations yet" description="Evaluations run when agents upload inventory." /> : (
               <ResponsiveContainer>
                 <LineChart data={s.history}>
-                  <CartesianGrid stroke="#202327" vertical={false} />
+                  <CartesianGrid stroke={cp.grid} vertical={false} />
                   <XAxis dataKey="date" tickFormatter={short} {...AXIS} />
                   <YAxis domain={[0, 100]} width={32} {...AXIS} />
                   <Tooltip {...TOOLTIP} labelFormatter={(v) => short(String(v))} />
-                  <Line type="monotone" dataKey="average_score" name="Avg score %" stroke="#10b981" strokeWidth={1.75} dot={{ r: 2.5 }} connectNulls />
-                  <Line type="monotone" dataKey="non_compliant" name="Non-compliant" stroke="#ef4444" strokeWidth={1.25} dot={false} />
+                  <Line type="monotone" dataKey="average_score" name="Avg score %" stroke={cp.ok} strokeWidth={1.75} dot={{ r: 2.5 }} connectNulls />
+                  <Line type="monotone" dataKey="non_compliant" name="Non-compliant" stroke={cp.bad} strokeWidth={1.25} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}

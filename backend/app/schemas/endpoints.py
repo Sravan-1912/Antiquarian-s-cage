@@ -53,6 +53,9 @@ class HeartbeatRequest(_Strict):
     agent_version: Tiny
     uptime_seconds: int | None = Field(default=None, ge=0, le=10 * 365 * 86400)
     logged_in_user: Short | None = None
+    # Cumulative since boot (all non-loopback adapters); usage = deltas between heartbeats.
+    net_bytes_sent: int | None = Field(default=None, ge=0, le=2**62)
+    net_bytes_recv: int | None = Field(default=None, ge=0, le=2**62)
 
 
 class HeartbeatResponse(BaseModel):
@@ -104,6 +107,46 @@ class SecurityCheck(_Strict):
     data: dict[str, str | int | bool | None] = Field(default_factory=dict, max_length=32)
 
 
+class TelemetryEvent(_Strict):
+    type: Annotated[str, StringConstraints(max_length=48, pattern=r"^[a-z_]+$")]
+    ts: datetime | None = None
+    data: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("data")
+    @classmethod
+    def _bound(cls, v: dict) -> dict:
+        # Bound each event so a compromised agent cannot flood the detection engine.
+        if len(v) > 24 or len(str(v)) > 4000:
+            raise ValueError("event payload too large")
+        return v
+
+
+class TelemetryRequest(_Strict):
+    """A batch of endpoint telemetry events (process creation, etc.) for the EDR detection engine."""
+    events: list[TelemetryEvent] = Field(default_factory=list, max_length=200)
+
+
+class WifiAccessPoint(_Strict):
+    mac: str = Field(pattern=r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+    signal_dbm: int | None = Field(default=None, ge=-120, le=0)
+    channel: int | None = Field(default=None, ge=0, le=200)
+
+
+class LocationRequest(_Strict):
+    """Nearby Wi-Fi access points the server resolves to a position (or falls back to IP geolocation)."""
+    wifi_access_points: list[WifiAccessPoint] = Field(default_factory=list, max_length=50)
+
+
+class SiteVisitIn(_Strict):
+    domain: Annotated[str, StringConstraints(max_length=255, pattern=r"^[a-z0-9.\-]+$")]
+    visits: int = Field(ge=0, le=10_000_000)
+
+
+class WebActivityRequest(_Strict):
+    """Aggregated per-domain visit counts (no full URLs) for the fleet "Top websites" view."""
+    sites: list[SiteVisitIn] = Field(default_factory=list, max_length=100)
+
+
 class InventoryRequest(_Strict):
     agent_version: Tiny
     collected_at: datetime | None = None
@@ -139,7 +182,7 @@ class RenewResponse(BaseModel):
 class EnrollmentTokenCreate(BaseModel):
     label: str = Field(min_length=2, max_length=128)
     employee_id: uuid.UUID | None = None
-    expires_in_minutes: int = Field(default=60, ge=5, le=1440)
+    expires_in_minutes: int | None = Field(default=60, ge=5, le=1440)  # None = indefinite (never expires)
 
 
 class EnrollmentTokenOut(ORMModel):
@@ -147,7 +190,7 @@ class EnrollmentTokenOut(ORMModel):
     label: str
     employee_id: uuid.UUID | None
     created_at: datetime
-    expires_at: datetime
+    expires_at: datetime | None  # None = indefinite (never expires)
     used_at: datetime | None
     used_by_device_id: uuid.UUID | None
     revoked_at: datetime | None
@@ -231,3 +274,40 @@ class DeviceUpdate(BaseModel):
 
 class DeviceActionRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
+
+
+class DeviceLocationOut(ORMModel):
+    source: str  # wifi | ip | none
+    latitude: float | None
+    longitude: float | None
+    accuracy_m: int | None
+    city: str | None
+    region: str | None
+    country: str | None
+    ip: str | None
+    ap_count: int
+    resolved_at: datetime
+
+
+class FleetLocationOut(BaseModel):
+    device_id: uuid.UUID
+    display_name: str
+    hostname: str
+    source: str
+    latitude: float | None
+    longitude: float | None
+    accuracy_m: int | None
+    city: str | None
+    country: str | None
+    resolved_at: datetime
+
+
+class DeviceTopSiteOut(BaseModel):
+    domain: str
+    visits: int
+
+
+class TopSiteOut(BaseModel):
+    domain: str
+    visits: int
+    endpoints: int

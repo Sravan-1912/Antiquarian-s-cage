@@ -8,6 +8,8 @@
 | Lock | Agent in user session (`LockWorkStation`); broker in session 0 (`WTSDisconnectSession`) | reason | Immediate lock; unsaved work is kept |
 | Restart | Broker | reason + **password re-entry** | `shutdown /r` with 60–3600 s on-screen warning and message; cancellable |
 | Cancel restart | Broker | reason | `shutdown /a` |
+| Power off | Broker | reason | `shutdown /s` (cross-platform; `shutdown -h`/`-P` on Linux) |
+| Log off user | Broker (session 0 → `WTSLogoffSession`) | reason | Signs the active user out |
 | Disable / enable local account | Broker | reason + password | Refuses to disable the last enabled local administrator |
 | Remove from Administrators | Broker | reason + password | Refuses to demote the last enabled local administrator |
 
@@ -35,6 +37,58 @@ three times (server, agent, broker). There is no arbitrary command or script exe
 
 What is deliberately **not** implemented: hidden screen capture, keylogging, microphone access, silent sessions,
 or any custom remote-control protocol.
+
+## Remote desktop (RDP)
+
+For full remote control, a Super Admin or assigned Admin can start an **unattended Remote Desktop** session from the
+endpoint's page (**Remote desktop**). Unlike remote assistance it needs **no consent prompt and no password step-up** —
+but it is *not* silent:
+
+1. The console issues a signed `rdp.start` job (allowlisted, short-lived) carrying a one-time relay token. RBAC
+   (`devices:remote`) and admin isolation still apply; the request is audited and notifies endpoint managers.
+2. On the endpoint the agent **shows the mandatory banner first** ("● REMOTE DESKTOP ACTIVE", always-on-top, cannot be
+   minimised, with an *End session* button). Only once the banner is on screen does the privileged broker enable native
+   Windows Remote Desktop (`fDenyTSConnections=0`) and open the firewall. **If the banner cannot be shown, RDP is never
+   enabled** — the session fails closed. There is no silent mode.
+3. The agent then opens an **outbound WebSocket tunnel to the backend** (`/agent/v1/rdp/tunnel`) and bridges it to its
+   local `127.0.0.1:3389`.
+4. In the console, **Connect** mints a one-time operator token (`/remote-sessions/{id}/rdp-connect`) and the desktop app
+   opens a matching outbound tunnel (`/api/v1/rdp/tunnel`), exposes a local port, and launches `mstsc` at it.
+5. The backend **relay** copies bytes between the two tunnels (it never interprets RDP). Because **both ends dial out**,
+   this works across any network — home Wi-Fi, mobile, another office — with **no VPN and no inbound firewall rule** on
+   either side.
+6. The session ends when: the person at the endpoint clicks *End session*; the operator ends it in the console (signed
+   `rdp.end`); the timer/expiry is reached; or the agent stops. Every path closes the banner + both tunnels, has the
+   broker **disable Remote Desktop and close the firewall again**, and is audited.
+
+### Cross-network requirements
+
+* The endpoints and the operator must reach the **same backend**. For devices on different networks that means a
+  **publicly reachable (cloud) backend** (see `13-cloud-deployment.md`) — the agents dial out to it for heartbeats and
+  for the RDP tunnel. The desktop app's default **loopback** backend is for a single local machine only.
+* The admin uses the **installed desktop app** to connect (it provides the local tunnel + `mstsc`). Point it at the
+  shared backend with `CAGE_REMOTE_BACKEND_URL=https://your-backend` instead of its bundled local one. A plain browser
+  cannot open the local tunnel, so **Connect** there explains that the desktop app is required.
+* The relay pairs the two tunnels **in one process**, so run a single backend instance (or sticky-route the two
+  `/rdp/tunnel` paths of a session to the same instance).
+
+### Host support & limitations
+
+* **Windows Pro/Enterprise:** the broker enables native RDP, then **verifies a listener comes up on `:3389`**. If none
+  does — notably on **Windows Home, which cannot host Remote Desktop at all** — the broker reverts its changes and
+  returns a clear *"this endpoint can't host Remote Desktop — use Remote Assistance instead"* message, rather than
+  letting the operator's `mstsc` hit a cryptic "can't connect" dialog.
+* **Linux:** the host is **xrdp**. The root agent enables it directly (`systemctl enable --now xrdp` + firewall) — there
+  is no separate broker on Linux — and shows the banner **in the logged-in desktop user's session**. It needs `xrdp`
+  installed and an active graphical session; with none it refuses (fail closed). *(Implemented; verify on a real Linux
+  desktop endpoint with xrdp before relying on it.)*
+* **Session-0 caveat:** if the agent cannot show the banner (a Windows **service** in session 0, or no graphical session
+  on Linux), no RDP session starts. The auto-start installer runs the agent as an **elevated logon task** in the user
+  session precisely so the banner works — see [`14-desktop-app.md`](14-desktop-app.md).
+* The full path (enable → banner → tunnel → relay → `mstsc` → disable) is **security-sensitive** (it toggles RDP and the
+  firewall) and should be tested on isolated VMs before relying on it.
+* Between the banner closing and the server-issued `rdp.end` there is a brief window before RDP is disabled (seconds),
+  the same round-trip the assistance cleanup uses.
 
 ## Limitations
 

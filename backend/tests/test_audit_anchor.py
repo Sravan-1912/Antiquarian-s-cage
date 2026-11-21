@@ -16,17 +16,23 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _as_owner(sql: str, table: str) -> None:
-    """Simulate an attacker with schema-owner rights: on PostgreSQL they must first disable the append-only trigger."""
+    """Simulate an attacker with schema-owner rights who first defeats the append-only protection: on PostgreSQL by
+    disabling the trigger, on SQLite by dropping the per-verb triggers (then restoring them)."""
     url = os.environ["MIGRATION_DATABASE_URL"]
     eng = create_engine(url)
     with eng.begin() as c:
-        pg = c.dialect.name == "postgresql"
-        trig = f"{table}_no_update_delete"
-        if pg:
+        if c.dialect.name == "postgresql":
+            trig = f"{table}_no_update_delete"
             c.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {trig}"))
-        c.execute(text(sql))
-        if pg:
+            c.execute(text(sql))
             c.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER {trig}"))
+        else:  # sqlite
+            for verb in ("update", "delete"):
+                c.execute(text(f"DROP TRIGGER IF EXISTS {table}_no_{verb}"))
+            c.execute(text(sql))
+            for verb in ("UPDATE", "DELETE"):
+                c.execute(text(f"CREATE TRIGGER {table}_no_{verb.lower()} BEFORE {verb} ON {table} "
+                               f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END"))
     eng.dispose()
 
 
@@ -120,15 +126,14 @@ def test_external_write_failure_is_not_silent(client, outbox, monkeypatch):
         assert alert is not None and alert.severity == "high"
 
 
-def test_anchors_append_only_on_postgres(client, outbox):
+def test_anchors_append_only(client, outbox):
+    """audit_anchors is append-only at the database level on both PostgreSQL (migrations 0001/0007) and SQLite (0015)."""
     _setup(client, outbox)
     client.post("/api/v1/audit/anchors", headers=csrf(client))
     from sqlalchemy.exc import DBAPIError
 
     from app.core.database import session_factory
     with session_factory()() as db:
-        if db.bind.dialect.name != "postgresql":
-            pytest.skip("trigger exists only on PostgreSQL")
         with pytest.raises(DBAPIError):
             db.execute(text("DELETE FROM audit_anchors"))
             db.commit()

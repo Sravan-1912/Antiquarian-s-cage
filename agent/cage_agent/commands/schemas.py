@@ -10,8 +10,12 @@ USERNAME = re.compile(r"^[A-Za-z0-9._\- ]{1,20}$")
 ROUTE = {
     "policy.apply": "broker", "policy.remove": "broker",
     "device.inspect": "agent", "device.lock": "agent", "device.restart": "broker", "device.restart_cancel": "broker",
+    "device.shutdown": "broker", "device.logoff": "broker",
     "account.disable": "broker", "account.enable": "broker", "account.remove_admin": "broker",
+    "device.isolate": "broker", "device.release": "broker",
     "assist.start": "agent", "assist.end": "agent",
+    "rdp.start": "agent", "rdp.end": "agent",
+    "shell.start": "agent", "shell.end": "agent",
 }
 ALLOWED_COMMANDS = set(ROUTE)
 COMMON = {"reason", "requested_by"}
@@ -35,9 +39,12 @@ def validate_command_params(command: str, p) -> dict:
         raise ValueError("parameters must be an object")
     for k in COMMON & set(p):
         _str(p, k, 500)
-    if command in ("device.inspect", "device.lock", "device.restart_cancel"):
+    if command in ("device.inspect", "device.lock", "device.restart_cancel", "device.logoff", "device.release"):
         _keys(p, set())
-    elif command == "device.restart":
+    elif command == "device.isolate":
+        _keys(p, {"server_host"})
+        _str(p, "server_host", 255)  # backend host to keep reachable so the endpoint can be released
+    elif command in ("device.restart", "device.shutdown"):
         _keys(p, {"delay_seconds", "message"})
         d = p.get("delay_seconds")
         if not isinstance(d, int) or isinstance(d, bool) or not 60 <= d <= 3600:
@@ -60,6 +67,28 @@ def validate_command_params(command: str, p) -> dict:
         if not isinstance(t, int) or not 30 <= t <= 300:
             raise ValueError("consent_timeout_seconds must be 30..300")
     elif command == "assist.end":
+        _keys(p, {"session_id"})
+        uuid.UUID(_str(p, "session_id", 36))
+    elif command == "rdp.start":
+        _keys(p, {"session_id", "max_minutes", "tunnel_token"})
+        uuid.UUID(_str(p, "session_id", 36))
+        m = p.get("max_minutes")
+        if not isinstance(m, int) or not 5 <= m <= 120:
+            raise ValueError("max_minutes must be 5..120")
+        _str(p, "tunnel_token", 256)
+    elif command == "rdp.end":
+        _keys(p, {"session_id"})
+        uuid.UUID(_str(p, "session_id", 36))
+    elif command == "shell.start":
+        _keys(p, {"session_id", "max_minutes", "tunnel_token", "elevated"})
+        uuid.UUID(_str(p, "session_id", 36))
+        m = p.get("max_minutes")
+        if not isinstance(m, int) or not 5 <= m <= 120:
+            raise ValueError("max_minutes must be 5..120")
+        _str(p, "tunnel_token", 256)
+        if not isinstance(p.get("elevated", False), bool):
+            raise ValueError("elevated must be a boolean")
+    elif command == "shell.end":
         _keys(p, {"session_id"})
         uuid.UUID(_str(p, "session_id", 36))
     else:
