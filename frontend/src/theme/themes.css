@@ -203,3 +203,260 @@ html { transition: none; }
   --color-emerald-200: #065f46; --color-amber-200: #92400e; --color-red-200: #991b1b; --color-sky-200: #075985;
 }
 [data-theme="alabaster"] body, [data-theme="garnet-champagne"] body { color-scheme: light; }
+
+/* ==================================================================================================================
+   CHART / DASHBOARD TOKENS  — every pie/donut/bar/line/area reads these via useChartPalette(); defaults match the
+   original console look. Status hues (ok/bad/warn/info) preserve green=good / red=bad across all themes.
+   ================================================================================================================== */
+:root {
+  --chart-1: #34d399; --chart-2: #38bdf8; --chart-3: #a78bfa; --chart-4: #f59e0b; --chart-5: #94a3b8; --chart-6: #f472b6;
+  --chart-grid: #202327; --chart-axis: #5f646b; --chart-text: #d8dbde;
+  --chart-tooltip-bg: #0d0e10; --chart-tooltip-border: #2b2f34; --chart-tooltip-text: #d8dbde; --chart-tooltip-label: #9a9ea4;
+  --chart-stroke: none; --chart-stroke-width: 0; --chart-track: #202327;
+  --chart-ok: #10b981; --chart-bad: #ef4444; --chart-warn: #f59e0b; --chart-info: #38bdf8; --chart-neutral: #64748b; --chart-muted: #5f646b;
+  --chart-crit: #dc2626; --chart-high: #f97316;
+  /* Geometry tokens (buttons/inputs consume these in controls.css; cards get their radius from per-theme surfaces). */
+  --btn-radius: 0.375rem; --input-radius: 0.375rem;
+}
+
+/* ---- Per-theme chart palettes for the original 15 (categorical series differ; status stays semantic) ---- */
+[data-theme="obsidian"] { --chart-1:#f5c87a; --chart-2:#e4e4e7; --chart-3:#a1a1aa; --chart-4:#fbbf24; --chart-5:#71717a; --chart-6:#d4a65a; --chart-grid:#1c1c20; --chart-axis:#71717a; --chart-text:#e4e4e7; --chart-tooltip-bg:#050506; --chart-tooltip-border:#27272a; --chart-tooltip-text:#f4f4f5; }
+[data-theme="tokyo-night"] { --chart-1:#7dcfff; --chart-2:#bb9af7; --chart-3:#9ece6a; --chart-4:#e0af68; --chart-5:#7aa2f7; --chart-6:#f7768e; --chart-grid:#2f3450; --chart-axis:#565f89; --chart-text:#c0caf5; --chart-tooltip-bg:#16161e; --chart-tooltip-border:#2f3450; --chart-tooltip-text:#c0caf5; --chart-ok:#9ece6a; --chart-bad:#f7768e; --chart-warn:#e0af68; --chart-info:#7dcfff; }
+[data-theme="catppuccin-mocha"] { --chart-1:#cba6f7; --chart-2:#89dceb; --chart-3:#a6e3a1; --chart-4:#f9e2af; --chart-5:#89b4fa; --chart-6:#f38ba8; --chart-grid:#313244; --chart-axis:#6c7086; --chart-text:#cdd6f4; --chart-tooltip-bg:#181825; --chart-tooltip-border:#313244; --chart-tooltip-text:#cdd6f4; --chart-ok:#a6e3a1; --chart-bad:#f38ba8; --chart-warn:#f9e2af; --chart-info:#89dceb; }
+[data-theme="cyberpunk"] { --chart-1:#00f0ff; --chart-2:#ff007c; --chart-3:#b14dff; --chart-4:#39ff14; --chart-5:#ffe600; --chart-6:#ff5e00; --chart-grid:rgba(0,240,255,0.1); --chart-axis:#8f74c4; --chart-text:#e0d3ff; --chart-tooltip-bg:#0b0716; --chart-tooltip-border:rgba(0,240,255,0.3); --chart-tooltip-text:#e0d3ff; --chart-ok:#39ff14; --chart-bad:#ff007c; --chart-warn:#ffe600; --chart-info:#00f0ff; }
+[data-theme="nordic"] { --chart-1:#88c0d0; --chart-2:#81a1c1; --chart-3:#a3be8c; --chart-4:#ebcb8b; --chart-5:#b48ead; --chart-6:#d08770; --chart-grid:#434c5e; --chart-axis:#7b8699; --chart-text:#e5e9f0; --chart-tooltip-bg:#272c36; --chart-tooltip-border:#434c5e; --chart-tooltip-text:#e5e9f0; --chart-ok:#a3be8c; --chart-bad:#bf616a; --chart-warn:#ebcb8b; --chart-info:#88c0d0; }
+[data-theme="dracula"] { --chart-1:#bd93f9; --chart-2:#8be9fd; --chart-3:#50fa7b; --chart-4:#f1fa8c; --chart-5:#ff79c6; --chart-6:#ffb86c; --chart-grid:#424458; --chart-axis:#6272a4; --chart-text:#f8f8f2; --chart-tooltip-bg:#21222c; --chart-tooltip-border:#424458; --chart-tooltip-text:#f8f8f2; --chart-ok:#50fa7b; --chart-bad:#ff5555; --chart-warn:#f1fa8c; --chart-info:#8be9fd; }
+[data-theme="gruvbox"] { --chart-1:#fabd2f; --chart-2:#83a598; --chart-3:#b8bb26; --chart-4:#fe8019; --chart-5:#d3869b; --chart-6:#8ec07c; --chart-grid:#504945; --chart-axis:#928374; --chart-text:#ebdbb2; --chart-tooltip-bg:#1d2021; --chart-tooltip-border:#504945; --chart-tooltip-text:#ebdbb2; --chart-ok:#b8bb26; --chart-bad:#fb4934; --chart-warn:#fabd2f; --chart-info:#83a598; }
+[data-theme="alabaster"] { --chart-1:#4f46e5; --chart-2:#0ea5e9; --chart-3:#7c3aed; --chart-4:#d97706; --chart-5:#64748b; --chart-6:#db2777; --chart-grid:#e2e5ec; --chart-axis:#8a93a6; --chart-text:#1a2234; --chart-tooltip-bg:#ffffff; --chart-tooltip-border:#d4d8e2; --chart-tooltip-text:#1a2234; --chart-tooltip-label:#6d7689; --chart-track:#e2e5ec; --chart-ok:#047857; --chart-bad:#b91c1c; --chart-warn:#b45309; --chart-info:#0369a1; --chart-neutral:#64748b; --chart-muted:#94a3b8; }
+[data-theme="velvet-burgundy"] { --chart-1:#d4af7a; --chart-2:#c97b84; --chart-3:#9f6e8f; --chart-4:#e0a86a; --chart-5:#a9847d; --chart-6:#8c5a6a; --chart-grid:#3a1620; --chart-axis:#8a6761; --chart-text:#f7ede8; --chart-tooltip-bg:#140609; --chart-tooltip-border:#4e1f2c; --chart-tooltip-text:#f7ede8; --chart-ok:#86b37a; --chart-bad:#e5555f; --chart-warn:#d4af7a; --chart-info:#8fb4c4; }
+[data-theme="crimson-glass"] { --chart-1:#fb7185; --chart-2:#f0abfc; --chart-3:#fda4af; --chart-4:#fdba74; --chart-5:#c4849a; --chart-6:#f472b6; --chart-grid:rgba(255,180,195,0.14); --chart-axis:#b47f8a; --chart-text:#f6d3da; --chart-tooltip-bg:#1c080e; --chart-tooltip-border:rgba(255,180,195,0.26); --chart-tooltip-text:#f6d3da; --chart-ok:#6fd58a; --chart-bad:#ff5a6a; }
+[data-theme="cabernet-noir"] { --chart-1:#a32938; --chart-2:#c77b85; --chart-3:#8f5a68; --chart-4:#d99a7a; --chart-5:#6b4a52; --chart-6:#be5a6a; --chart-grid:#301a24; --chart-axis:#8a6a6f; --chart-text:#e3c9cd; --chart-tooltip-bg:#0c0910; --chart-tooltip-border:#3a202b; --chart-tooltip-text:#e3c9cd; }
+[data-theme="scarlet-ops"] { --chart-1:#ef233c; --chart-2:#ff8fa0; --chart-3:#ffb3bc; --chart-4:#ff6b4a; --chart-5:#a4a4b0; --chart-6:#d9455a; --chart-grid:rgba(239,35,60,0.12); --chart-axis:#76767f; --chart-text:#e3e3e8; --chart-tooltip-bg:#08080a; --chart-tooltip-border:rgba(239,35,60,0.3); --chart-tooltip-text:#e3e3e8; --chart-bad:#ef233c; }
+[data-theme="garnet-champagne"] { --chart-1:#7a1626; --chart-2:#b5653a; --chart-3:#9a7b3a; --chart-4:#c08a4e; --chart-5:#8a6d70; --chart-6:#a83f5a; --chart-grid:#ece0d7; --chart-axis:#a98c8f; --chart-text:#26181a; --chart-tooltip-bg:#ffffff; --chart-tooltip-border:#ddcabf; --chart-tooltip-text:#26181a; --chart-tooltip-label:#8a6d70; --chart-track:#ece0d7; --chart-ok:#047857; --chart-bad:#9f1239; --chart-warn:#b45309; --chart-info:#0369a1; --chart-muted:#c6ab9d; }
+
+/* ==================================================================================================================
+   16–26.  ELEVEN ICONIC DESIGN-STYLE THEMES.  Each remaps the surface/foreground tokens AND restyles cards via the
+   [class*="bg-ink-9"] surface hook, so geometry (radius/border/shadow), typography and charts transform wholesale.
+   ================================================================================================================== */
+
+/* ---- 16. Neumorphism (Soft UI) ---- */
+[data-theme="neumorphism"] {
+  --color-ink-950:#d3d9e6; --color-ink-900:#e9edf5; --color-ink-850:#e4e9f2; --color-ink-800:#eef2f9;
+  --color-ink-700:#d6dde9; --color-ink-600:#c5ccd9; --color-ink-500:#aab3c5;
+  --color-silver-50:#1f2633; --color-silver-100:#2b3444; --color-silver-200:#3b4556; --color-silver-400:#5f6b80;
+  --color-silver-500:#78869b; --color-silver-600:#95a1b5; --cage-accent:#5b7cfa;
+  --chart-1:#5b7cfa; --chart-2:#56c6c0; --chart-3:#f0a0c4; --chart-4:#f6c77a; --chart-5:#9aa6c0; --chart-6:#b98ae0;
+  --chart-grid:#d2d8e4; --chart-axis:#8894ab; --chart-text:#2b3444; --chart-tooltip-bg:#eef2f9; --chart-tooltip-border:#c5ccd9; --chart-tooltip-text:#2b3444; --chart-tooltip-label:#78869b; --chart-track:#d6dde9;
+  --chart-ok:#16a34a; --chart-bad:#dc2626; --chart-warn:#d97706; --chart-info:#0ea5e9; --chart-neutral:#94a3b8; --chart-muted:#c5ccd9;
+  --btn-radius:16px; --input-radius:14px;
+}
+[data-theme="neumorphism"] body { background:#e4e9f2; }
+[data-theme="neumorphism"] [class*="bg-ink-9"], [data-theme="neumorphism"] [class*="bg-ink-8"] {
+  border:none !important; border-radius:18px; background:#e9edf5 !important; box-shadow:8px 8px 16px #c5ccd9, -8px -8px 16px #ffffff;
+}
+
+/* ---- 17. Claymorphism ---- */
+[data-theme="claymorphism"] {
+  --color-ink-950:#e4e5fb; --color-ink-900:#f3f4ff; --color-ink-850:#eef0ff; --color-ink-800:#e7e9fb;
+  --color-ink-700:#dcdcf5; --color-ink-600:#c9c9ec; --color-ink-500:#b3b3e0;
+  --color-silver-50:#242245; --color-silver-100:#322f55; --color-silver-200:#433f69; --color-silver-400:#6b6790;
+  --color-silver-500:#8884ab; --color-silver-600:#a4a0c4; --cage-accent:#7c6cf0;
+  --chart-1:#ff8a8a; --chart-2:#6fb7ff; --chart-3:#7fe0b0; --chart-4:#ffd27f; --chart-5:#b89bff; --chart-6:#ff9ecb;
+  --chart-grid:#dcdcf5; --chart-axis:#8884ab; --chart-text:#322f55; --chart-tooltip-bg:#f3f4ff; --chart-tooltip-border:#c9c9ec; --chart-tooltip-text:#322f55; --chart-tooltip-label:#8884ab; --chart-track:#dcdcf5;
+  --chart-ok:#16a34a; --chart-bad:#e11d48; --chart-warn:#d97706; --chart-info:#2563eb; --chart-neutral:#9ca3af; --chart-muted:#c9c9ec;
+  --btn-radius:18px; --input-radius:16px;
+}
+[data-theme="claymorphism"] body { background:#eef0ff; }
+[data-theme="claymorphism"] [class*="bg-ink-9"], [data-theme="claymorphism"] [class*="bg-ink-8"] {
+  border:none !important; border-radius:24px; background:#f3f4ff !important;
+  box-shadow:0 16px 32px rgba(99,102,241,0.14), inset -6px -6px 14px rgba(148,163,184,0.25), inset 6px 6px 14px rgba(255,255,255,0.9);
+}
+
+/* ---- 18. Neobrutalism ---- */
+[data-theme="neobrutalism"] {
+  --color-ink-950:#f5eccf; --color-ink-900:#ffffff; --color-ink-850:#fffdf5; --color-ink-800:#fdf6e3;
+  --color-ink-700:#000000; --color-ink-600:#000000; --color-ink-500:#111111;
+  --color-silver-50:#0a0a0a; --color-silver-100:#141414; --color-silver-200:#1f1f1f; --color-silver-400:#3a3a3a;
+  --color-silver-500:#555555; --color-silver-600:#6b6b6b; --cage-accent:#ff5c8a;
+  --chart-1:#ffde00; --chart-2:#ff5c8a; --chart-3:#00e5ff; --chart-4:#a3e635; --chart-5:#9b5cff; --chart-6:#ff8a00;
+  --chart-grid:#000000; --chart-axis:#000000; --chart-text:#000000; --chart-tooltip-bg:#ffffff; --chart-tooltip-border:#000000; --chart-tooltip-text:#000000; --chart-tooltip-label:#000000;
+  --chart-stroke:#000000; --chart-stroke-width:2.5; --chart-track:#e5e5e5;
+  --chart-ok:#16a34a; --chart-bad:#ef4444; --chart-warn:#f59e0b; --chart-info:#0ea5e9; --chart-neutral:#737373; --chart-muted:#d4d4d4;
+  --btn-radius:4px; --input-radius:4px;
+}
+[data-theme="neobrutalism"] body { background:#fdf6e3; }
+[data-theme="neobrutalism"] [class*="bg-ink-9"], [data-theme="neobrutalism"] [class*="bg-ink-8"] {
+  border:3px solid #000 !important; border-radius:4px; background:#ffffff !important; box-shadow:6px 6px 0 #000;
+}
+
+/* ---- 19. Minimalist / Swiss Dark ---- */
+[data-theme="swiss-dark"] {
+  --color-ink-950:#000000; --color-ink-900:#111113; --color-ink-850:#09090b; --color-ink-800:#161618;
+  --color-ink-700:rgba(255,255,255,0.08); --color-ink-600:rgba(255,255,255,0.14); --color-ink-500:rgba(255,255,255,0.22);
+  --color-silver-50:#fafafa; --color-silver-100:#ededed; --color-silver-200:#d4d4d4; --color-silver-400:#a1a1a1;
+  --color-silver-500:#737373; --color-silver-600:#525252; --cage-accent:#6366f1;
+  --chart-1:#6366f1; --chart-2:#94a3b8; --chart-3:#cbd5e1; --chart-4:#818cf8; --chart-5:#64748b; --chart-6:#475569;
+  --chart-grid:rgba(255,255,255,0.08); --chart-axis:#737373; --chart-text:#ededed; --chart-tooltip-bg:#111113; --chart-tooltip-border:rgba(255,255,255,0.12); --chart-tooltip-text:#ededed; --chart-tooltip-label:#a1a1a1;
+  --chart-ok:#22c55e; --chart-bad:#ef4444; --chart-warn:#eab308; --chart-info:#6366f1; --chart-neutral:#64748b; --chart-muted:#3f3f46;
+  --btn-radius:8px; --input-radius:8px;
+}
+[data-theme="swiss-dark"] body { background:#09090b; }
+[data-theme="swiss-dark"] [class*="bg-ink-9"], [data-theme="swiss-dark"] [class*="bg-ink-8"] {
+  border:1px solid rgba(255,255,255,0.08) !important; border-radius:10px; background:#111113 !important; box-shadow:none;
+}
+
+/* ---- 20. Material You (Material 3) ---- */
+[data-theme="material-you"] {
+  --color-ink-950:#e5e9df; --color-ink-900:#ecefe6; --color-ink-850:#eef1e9; --color-ink-800:#f2f4ee;
+  --color-ink-700:#dde2d6; --color-ink-600:#cdd4c6; --color-ink-500:#b3bca9;
+  --color-silver-50:#1a1c18; --color-silver-100:#272a22; --color-silver-200:#3a3d33; --color-silver-400:#5b6153;
+  --color-silver-500:#767c6c; --color-silver-600:#929884; --cage-accent:#5c7a3f;
+  --chart-1:#5c7a3f; --chart-2:#7b6ea8; --chart-3:#c28f6a; --chart-4:#6f9e8f; --chart-5:#b0a06a; --chart-6:#a86f8e;
+  --chart-grid:#dde2d6; --chart-axis:#929884; --chart-text:#272a22; --chart-tooltip-bg:#f2f4ee; --chart-tooltip-border:#cdd4c6; --chart-tooltip-text:#272a22; --chart-tooltip-label:#767c6c; --chart-track:#dde2d6;
+  --chart-ok:#2e7d32; --chart-bad:#b3261e; --chart-warn:#9a6700; --chart-info:#1565c0; --chart-neutral:#8a9080; --chart-muted:#cdd4c6;
+  --btn-radius:9999px; --input-radius:16px;
+}
+[data-theme="material-you"] body { background:#f6f7f2; }
+[data-theme="material-you"] [class*="bg-ink-9"], [data-theme="material-you"] [class*="bg-ink-8"] {
+  border:none !important; border-radius:20px; background:#ecefe6 !important; box-shadow:0 1px 3px rgba(26,28,24,0.08);
+}
+
+/* ---- 21. Skeuomorphism (brushed metal) ---- */
+[data-theme="skeuomorphism"] {
+  --color-ink-950:#17181a; --color-ink-900:#1f2124; --color-ink-850:#26282c; --color-ink-800:#2d3034;
+  --color-ink-700:#3a3d42; --color-ink-600:#4a4e54; --color-ink-500:#5e636a;
+  --color-silver-50:#f5f6f7; --color-silver-100:#e3e5e8; --color-silver-200:#cdd0d5; --color-silver-400:#9aa0a8;
+  --color-silver-500:#767c84; --color-silver-600:#585d64; --cage-accent:#6ea0e0;
+  --chart-1:#6ea0e0; --chart-2:#5cb85c; --chart-3:#e0a84e; --chart-4:#d9534f; --chart-5:#9b72cf; --chart-6:#45b7b7;
+  --chart-grid:#3a3d42; --chart-axis:#767c84; --chart-text:#e3e5e8; --chart-tooltip-bg:#1b1d20; --chart-tooltip-border:#4a4e54; --chart-tooltip-text:#e3e5e8;
+  --chart-ok:#5cb85c; --chart-bad:#d9534f; --chart-warn:#e0a84e; --chart-info:#6ea0e0; --chart-neutral:#8a9098; --chart-muted:#4a4e54;
+  --btn-radius:10px; --input-radius:8px;
+}
+[data-theme="skeuomorphism"] body { background:linear-gradient(180deg,#2b2e33,#17181a) fixed; }
+[data-theme="skeuomorphism"] [class*="bg-ink-9"], [data-theme="skeuomorphism"] [class*="bg-ink-8"] {
+  border:1px solid rgba(0,0,0,0.5) !important; border-top-color:rgba(255,255,255,0.18) !important; border-radius:12px;
+  background:linear-gradient(180deg,#2a2d31,#1b1d20) !important; box-shadow:inset 0 1px 0 rgba(255,255,255,0.12), 0 8px 20px rgba(0,0,0,0.5);
+}
+
+/* ---- 22. Cyberpunk / Neon Noir ---- */
+[data-theme="cyberpunk-noir"] {
+  --color-ink-950:#050309; --color-ink-900:rgba(15,10,30,0.85); --color-ink-850:rgba(20,13,40,0.8); --color-ink-800:rgba(26,16,50,0.78);
+  --color-ink-700:rgba(0,240,255,0.2); --color-ink-600:rgba(255,0,124,0.3); --color-ink-500:rgba(0,240,255,0.4);
+  --color-silver-50:#eafcff; --color-silver-100:#cdfaff; --color-silver-200:#a7e9ff; --color-silver-400:#79a9d6;
+  --color-silver-500:#5f86b0; --color-silver-600:#49688c; --cage-accent:#00f0ff;
+  --chart-1:#00f0ff; --chart-2:#ff007c; --chart-3:#b14dff; --chart-4:#39ff14; --chart-5:#ffe600; --chart-6:#ff5e00;
+  --chart-grid:rgba(0,240,255,0.12); --chart-axis:#5f86b0; --chart-text:#cdfaff; --chart-tooltip-bg:#0a0616; --chart-tooltip-border:rgba(0,240,255,0.3); --chart-tooltip-text:#cdfaff;
+  --chart-ok:#39ff14; --chart-bad:#ff007c; --chart-warn:#ffe600; --chart-info:#00f0ff; --chart-neutral:#5f86b0; --chart-muted:#2a2050;
+  --btn-radius:2px; --input-radius:2px;
+}
+[data-theme="cyberpunk-noir"] body {
+  background:
+    linear-gradient(rgba(7,5,16,0.9), rgba(7,5,16,0.9)),
+    repeating-linear-gradient(0deg, rgba(0,240,255,0.06) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, rgba(255,0,124,0.05) 0 1px, transparent 1px 4px), #070510;
+}
+[data-theme="cyberpunk-noir"] [class*="bg-ink-9"], [data-theme="cyberpunk-noir"] [class*="bg-ink-8"] {
+  border:1px solid rgba(0,240,255,0.35) !important; border-radius:2px; background:rgba(15,10,30,0.82) !important;
+  box-shadow:0 0 18px -4px rgba(255,0,124,0.4), inset 0 0 0 1px rgba(0,240,255,0.08); backdrop-filter:blur(4px);
+}
+
+/* ---- 23. Aurora / Mesh Gradient ---- */
+[data-theme="aurora-mesh"] {
+  --color-ink-950:rgba(8,12,24,0.7); --color-ink-900:rgba(15,23,42,0.62); --color-ink-850:rgba(18,26,46,0.56); --color-ink-800:rgba(22,30,52,0.5);
+  --color-ink-700:rgba(255,255,255,0.14); --color-ink-600:rgba(255,255,255,0.22); --color-ink-500:rgba(255,255,255,0.32);
+  --color-silver-50:#f5f8ff; --color-silver-100:#e6ecfb; --color-silver-200:#d2dcf3; --color-silver-400:#a6b4d8;
+  --color-silver-500:#8695bd; --color-silver-600:#6b7aa0; --cage-accent:#a78bfa;
+  --chart-1:#a78bfa; --chart-2:#5eead4; --chart-3:#f0abfc; --chart-4:#93c5fd; --chart-5:#fda4af; --chart-6:#c4b5fd;
+  --chart-grid:rgba(255,255,255,0.1); --chart-axis:#8695bd; --chart-text:#e6ecfb; --chart-tooltip-bg:rgba(15,23,42,0.92); --chart-tooltip-border:rgba(255,255,255,0.2); --chart-tooltip-text:#e6ecfb;
+  --chart-ok:#34d399; --chart-bad:#fb7185; --chart-warn:#fbbf24; --chart-info:#5eead4; --chart-neutral:#94a3b8; --chart-muted:rgba(255,255,255,0.18);
+  --btn-radius:14px; --input-radius:12px;
+}
+[data-theme="aurora-mesh"] body {
+  background:
+    radial-gradient(45% 45% at 15% 20%, rgba(99,102,241,0.5), transparent 60%),
+    radial-gradient(40% 40% at 85% 15%, rgba(20,184,166,0.45), transparent 60%),
+    radial-gradient(45% 45% at 75% 85%, rgba(244,114,182,0.4), transparent 60%),
+    radial-gradient(50% 50% at 25% 90%, rgba(139,92,246,0.4), transparent 60%), #0a0f1f;
+  background-size:200% 200%,180% 180%,220% 220%,200% 200%; background-attachment:fixed; animation:cage-mesh 28s ease-in-out infinite;
+}
+[data-theme="aurora-mesh"] [class*="bg-ink-9"], [data-theme="aurora-mesh"] [class*="bg-ink-8"] {
+  border:1px solid rgba(255,255,255,0.16) !important; border-radius:16px; background:rgba(15,23,42,0.55) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 40px -12px rgba(0,0,0,0.5); backdrop-filter:blur(20px) saturate(160%);
+}
+
+/* ---- 24. Terminal / TUI ---- */
+[data-theme="terminal-tui"] {
+  --color-ink-950:#000000; --color-ink-900:#000000; --color-ink-850:#030703; --color-ink-800:#061006;
+  --color-ink-700:#0f3d1a; --color-ink-600:#1f5129; --color-ink-500:#2a6b38;
+  --color-silver-50:#d6ffe0; --color-silver-100:#9dffb4; --color-silver-200:#66ff8c; --color-silver-400:#36c957;
+  --color-silver-500:#2a9644; --color-silver-600:#1f6f33; --cage-accent:#00ff66;
+  --chart-1:#00ff66; --chart-2:#00e0ff; --chart-3:#ffb000; --chart-4:#a3ff00; --chart-5:#ff5f5f; --chart-6:#c792ea;
+  --chart-grid:#0f3d1a; --chart-axis:#2a9644; --chart-text:#9dffb4; --chart-tooltip-bg:#000000; --chart-tooltip-border:#1f5129; --chart-tooltip-text:#9dffb4; --chart-tooltip-label:#36c957; --chart-track:#0f3d1a;
+  --chart-ok:#00ff66; --chart-bad:#ff5f5f; --chart-warn:#ffb000; --chart-info:#00e0ff; --chart-neutral:#2a9644; --chart-muted:#0f3d1a;
+  --btn-radius:0px; --input-radius:0px;
+}
+[data-theme="terminal-tui"], [data-theme="terminal-tui"] body, [data-theme="terminal-tui"] button, [data-theme="terminal-tui"] input, [data-theme="terminal-tui"] select {
+  font-family: var(--font-mono) !important;
+}
+[data-theme="terminal-tui"] body {
+  background:
+    repeating-linear-gradient(0deg, rgba(0,255,102,0.035) 0 1px, transparent 1px 3px), #000000;
+}
+[data-theme="terminal-tui"] [class*="bg-ink-9"], [data-theme="terminal-tui"] [class*="bg-ink-8"] {
+  border:1px solid #1f5129 !important; border-radius:0 !important; background:#000000 !important; box-shadow:none;
+}
+
+/* ---- 25. Frutiger Aero ---- */
+[data-theme="frutiger-aero"] {
+  --color-ink-950:#cfeefe; --color-ink-900:rgba(255,255,255,0.72); --color-ink-850:rgba(255,255,255,0.64); --color-ink-800:rgba(255,255,255,0.56);
+  --color-ink-700:rgba(120,180,220,0.4); --color-ink-600:rgba(90,150,200,0.5); --color-ink-500:rgba(70,130,180,0.6);
+  --color-silver-50:#06202e; --color-silver-100:#0c3346; --color-silver-200:#154863; --color-silver-400:#3f6d88;
+  --color-silver-500:#5a86a0; --color-silver-600:#79a0b8; --cage-accent:#00b4d8;
+  --chart-1:#00b4d8; --chart-2:#48cae4; --chart-3:#80ed99; --chart-4:#ffd166; --chart-5:#90e0ef; --chart-6:#f4978e;
+  --chart-grid:rgba(90,150,200,0.25); --chart-axis:#5a86a0; --chart-text:#0c3346; --chart-tooltip-bg:rgba(255,255,255,0.92); --chart-tooltip-border:rgba(90,150,200,0.4); --chart-tooltip-text:#0c3346; --chart-tooltip-label:#5a86a0; --chart-track:rgba(90,150,200,0.2);
+  --chart-ok:#0a9d58; --chart-bad:#d64545; --chart-warn:#cc8a00; --chart-info:#0077b6; --chart-neutral:#5a86a0; --chart-muted:rgba(90,150,200,0.3);
+  --btn-radius:18px; --input-radius:16px;
+}
+[data-theme="frutiger-aero"] body {
+  background:
+    radial-gradient(60% 50% at 20% 10%, rgba(0,200,220,0.55), transparent 60%),
+    radial-gradient(55% 55% at 85% 20%, rgba(80,220,140,0.45), transparent 60%),
+    linear-gradient(180deg,#8fe3ff,#2bb3d6 55%,#17a06a); background-attachment:fixed;
+}
+[data-theme="frutiger-aero"] [class*="bg-ink-9"], [data-theme="frutiger-aero"] [class*="bg-ink-8"] {
+  border:1px solid rgba(255,255,255,0.7) !important; border-radius:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.52)) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.95), 0 10px 30px -10px rgba(0,80,140,0.35); backdrop-filter:blur(18px) saturate(140%);
+}
+
+/* ---- 26. Retro OS 95 ---- */
+[data-theme="retro-95"] {
+  --color-ink-950:#008080; --color-ink-900:#c0c0c0; --color-ink-850:#c8c8c8; --color-ink-800:#d4d0c8;
+  --color-ink-700:#808080; --color-ink-600:#404040; --color-ink-500:#2a2a2a;
+  --color-silver-50:#000000; --color-silver-100:#0a0a0a; --color-silver-200:#1a1a1a; --color-silver-400:#333333;
+  --color-silver-500:#000080; --color-silver-600:#444444; --cage-accent:#000080;
+  --chart-1:#000080; --chart-2:#008080; --chart-3:#800080; --chart-4:#008000; --chart-5:#800000; --chart-6:#c0a000;
+  --chart-grid:#808080; --chart-axis:#000000; --chart-text:#000000; --chart-tooltip-bg:#c0c0c0; --chart-tooltip-border:#000000; --chart-tooltip-text:#000000; --chart-tooltip-label:#000080;
+  --chart-stroke:#000000; --chart-stroke-width:1; --chart-track:#a0a0a0;
+  --chart-ok:#008000; --chart-bad:#800000; --chart-warn:#c0a000; --chart-info:#000080; --chart-neutral:#808080; --chart-muted:#a0a0a0;
+  --btn-radius:0px; --input-radius:0px;
+}
+[data-theme="retro-95"] body { background:#008080; }
+[data-theme="retro-95"] [class*="bg-ink-9"], [data-theme="retro-95"] [class*="bg-ink-8"] {
+  border:2px solid !important; border-color:#ffffff #404040 #404040 #ffffff !important; border-radius:0 !important;
+  background:#c0c0c0 !important; box-shadow:inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
+}
+
+/* Light-surface status contrast for the new light themes. */
+[data-theme="neumorphism"], [data-theme="claymorphism"], [data-theme="neobrutalism"], [data-theme="material-you"], [data-theme="frutiger-aero"], [data-theme="retro-95"] {
+  --color-emerald-300:#047857; --color-amber-300:#b45309; --color-red-300:#b91c1c; --color-sky-300:#0369a1;
+  --color-emerald-200:#065f46; --color-amber-200:#92400e; --color-red-200:#991b1b; --color-sky-200:#075985;
+}
+[data-theme="neumorphism"] body, [data-theme="claymorphism"] body, [data-theme="neobrutalism"] body,
+[data-theme="material-you"] body, [data-theme="frutiger-aero"] body, [data-theme="retro-95"] body { color-scheme: light; }
+
+/* Neon glow on chart surfaces for the luminous themes. */
+[data-theme="cyberpunk-noir"] .recharts-surface { filter: drop-shadow(0 0 2px rgba(0,240,255,0.7)); }
+[data-theme="terminal-tui"] .recharts-surface { filter: drop-shadow(0 0 2px rgba(0,255,102,0.65)); }
+[data-theme="cyberpunk"] .recharts-surface { filter: drop-shadow(0 0 2px rgba(0,240,255,0.55)); }
+[data-theme="scarlet-ops"] .recharts-surface { filter: drop-shadow(0 0 2px rgba(239,35,60,0.5)); }

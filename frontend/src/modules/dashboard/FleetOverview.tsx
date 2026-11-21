@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { Laptop, ScrollText, ShieldAlert, ShieldCheck, Users } from 'lucide-react'
 import type { AlertDash, DashboardSummary, EndpointSummary, ModuleStatus, PolicyDash } from '@/types/api'
+import { chartTooltip, useChartPalette, type ChartPalette } from '@/theme/useChartPalette'
 
 const available = <T extends { available: true }>(m: ModuleStatus | T): m is T => (m as T).available === true
 
@@ -52,17 +53,18 @@ function StatCard({ icon: Icon, value, label, ratio, ratioLabel, foot, to, accen
   )
 }
 
-function Ring({ data, center }: { data: { name: string; value: number; color: string }[]; center?: React.ReactNode }) {
+function Ring({ data, center, p }: { data: { name: string; value: number; color: string }[]; center?: React.ReactNode; p: ChartPalette }) {
   const shown = data.filter((x) => x.value > 0)
+  const t = chartTooltip(p)
   return (
     <div className="relative h-48">
       <ResponsiveContainer>
         <PieChart>
-          <Pie data={shown.length ? shown : [{ name: 'none', value: 1, color: '#202327' }]} dataKey="value" nameKey="name"
-            innerRadius="72%" outerRadius="92%" paddingAngle={shown.length > 1 ? 2 : 0} stroke="none" startAngle={90} endAngle={-270}>
-            {(shown.length ? shown : [{ color: '#202327' }]).map((s, i) => <Cell key={i} fill={s.color} />)}
+          <Pie data={shown.length ? shown : [{ name: 'none', value: 1, color: p.track }]} dataKey="value" nameKey="name"
+            innerRadius="72%" outerRadius="92%" paddingAngle={shown.length > 1 ? 2 : 0} stroke={p.stroke} strokeWidth={p.strokeWidth} startAngle={90} endAngle={-270}>
+            {(shown.length ? shown : [{ color: p.track }]).map((s, i) => <Cell key={i} fill={s.color} />)}
           </Pie>
-          {shown.length > 0 && <Tooltip contentStyle={{ background: '#0d0e10', border: '1px solid #2b2f34', borderRadius: 6, fontSize: 12 }} itemStyle={{ color: '#d8dbde' }} />}
+          {shown.length > 0 && <Tooltip contentStyle={t.contentStyle} itemStyle={{ color: p.tooltip.text }} />}
         </PieChart>
       </ResponsiveContainer>
       {center && <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">{center}</div>}
@@ -82,16 +84,18 @@ function Legend({ items }: { items: { name: string; value: number | string; colo
   )
 }
 
-const PLATFORM_COLORS: Record<string, string> = { Windows: '#38bdf8', macOS: '#a78bfa', Linux: '#f59e0b', Unknown: '#5f646b' }
+const platformColor = (p: ChartPalette): Record<string, string> => ({ Windows: p.series[1], macOS: p.series[2], Linux: p.series[3], Unknown: p.muted })
 
 export function FleetOverview({ d }: { d: DashboardSummary }) {
+  const cp = useChartPalette()
   const e = available<EndpointSummary>(d.endpoints) ? d.endpoints : null
   const p = available<PolicyDash>(d.policies) ? d.policies : null
+  const PLATFORM_COLORS = platformColor(cp)
   const users = d.administrators.active + d.employees.active
   const adminsOnline = d.administrators.online
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="cage-stagger grid gap-4 md:grid-cols-3">
         <StatCard icon={Users} value={d.administrators.active} label="Console users" to="/administrators"
           ratio={pct(adminsOnline, d.administrators.active)} ratioLabel="online"
           foot={<><span className="text-emerald-400">Online: {adminsOnline}</span> <span className="font-semibold text-silver-200">Offline: {d.administrators.active - adminsOnline}</span>
@@ -113,20 +117,20 @@ export function FleetOverview({ d }: { d: DashboardSummary }) {
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="rounded-xl border border-ink-700 bg-ink-900/70 p-5">
               <h3 className="font-semibold text-silver-100">Total devices by platform</h3>
-              <Ring data={e.platforms.map((x) => ({ name: x.platform, value: x.count, color: PLATFORM_COLORS[x.platform] ?? '#94a3b8' }))}
+              <Ring p={cp} data={e.platforms.map((x) => ({ name: x.platform, value: x.count, color: PLATFORM_COLORS[x.platform] ?? cp.series[4] }))}
                 center={<div><div className="text-3xl font-bold text-silver-50">{e.enrolled}</div><div className="text-xs text-silver-500">devices</div></div>} />
-              <Legend items={e.platforms.map((x) => ({ name: x.platform, value: x.count, color: PLATFORM_COLORS[x.platform] ?? '#94a3b8' }))} />
+              <Legend items={e.platforms.map((x) => ({ name: x.platform, value: x.count, color: PLATFORM_COLORS[x.platform] ?? cp.series[4] }))} />
             </div>
             <div className="rounded-xl border border-ink-700 bg-ink-900/70 p-5">
               <h3 className="font-semibold text-silver-100">Last contact time</h3>
               {(() => {
                 const lc = e.last_contact
                 const items = [
-                  { name: 'Online now', value: lc.online, color: '#22c55e' }, { name: 'Under 1 hour', value: lc.under_1h, color: '#86efac' },
-                  { name: '1 to 24 hours', value: lc['1h_24h'], color: '#38bdf8' }, { name: '1 to 7 days', value: lc['1d_7d'], color: '#f59e0b' },
-                  { name: 'Over 7 days', value: lc.over_7d, color: '#ef4444' }, { name: 'Never', value: lc.never, color: '#5f646b' },
+                  { name: 'Online now', value: lc.online, color: cp.ok }, { name: 'Under 1 hour', value: lc.under_1h, color: cp.series[0] },
+                  { name: '1 to 24 hours', value: lc['1h_24h'], color: cp.info }, { name: '1 to 7 days', value: lc['1d_7d'], color: cp.warn },
+                  { name: 'Over 7 days', value: lc.over_7d, color: cp.bad }, { name: 'Never', value: lc.never, color: cp.muted },
                 ]
-                return <><Ring data={items} center={<div><div className="text-3xl font-bold text-emerald-400">{pct(lc.online, e.enrolled)}%</div><div className="text-xs text-silver-500">online now</div></div>} />
+                return <><Ring p={cp} data={items} center={<div><div className="text-3xl font-bold text-emerald-400">{pct(lc.online, e.enrolled)}%</div><div className="text-xs text-silver-500">online now</div></div>} />
                   <Legend items={items.filter((i) => i.value > 0 || ['Online now', 'Under 1 hour', '1 to 24 hours', '1 to 7 days'].includes(i.name))} /></>
               })()}
             </div>

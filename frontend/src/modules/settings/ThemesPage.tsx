@@ -96,7 +96,7 @@ function WallpaperStudio() {
 
 export function ThemesPage() {
   const { theme, setTheme } = useTheme()
-  const groups = ['Signature', 'Dark', 'Red & Burgundy', 'Light'] as const
+  const groups = ['Signature', 'Design Styles', 'Dark', 'Red & Burgundy', 'Light'] as const
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-center gap-2">

@@ -8,16 +8,8 @@ import { Alert, Badge, Button, Card, CardHeader, EmptyState, PageHeader, Spinner
 import { api, describeError } from '@/services/api'
 import type { ComplianceDash, DashboardSummary, EndpointSummary, ModuleStatus, PolicyDash } from '@/types/api'
 import { formatDateTime, humanizeAction, relativeTime } from '@/utils/format'
+import { chartAxis, chartTooltip, useChartPalette, type ChartPalette } from '@/theme/useChartPalette'
 import { FleetOverview, HealthChip } from './FleetOverview'
-
-const GRID = '#202327'
-const AXIS = { stroke: '#5f646b', fontSize: 11, tickLine: false, axisLine: false } as const
-const TOOLTIP = {
-  contentStyle: { background: '#0d0e10', border: '1px solid #2b2f34', borderRadius: 6, fontSize: 12, color: '#d8dbde' },
-  labelStyle: { color: '#9a9ea4' },
-  cursor: { fill: 'rgba(255,255,255,0.03)' },
-}
-const STATUS_COLORS = ['#10b981', '#64748b', '#f59e0b', '#ef4444']
 
 function Kpi({ label, value, icon: Icon, hint, tone }: { label: string; value: number | string; icon: React.ComponentType<{ className?: string }>; hint?: string; tone?: 'warn' }) {
   return (
@@ -40,10 +32,13 @@ function Pending({ m, icon }: { m: ModuleStatus; icon: React.ComponentType<{ cla
   )
 }
 
-const CONN_COLORS = { Online: '#10b981', Offline: '#ef4444', 'Never reported': '#5f646b' } as const
-const OS_COLORS = ['#34d399', '#38bdf8', '#a78bfa', '#f59e0b', '#94a3b8', '#f472b6']
+const connColors = (p: ChartPalette): Record<'Online' | 'Offline' | 'Never reported', string> => ({ Online: p.ok, Offline: p.bad, 'Never reported': p.muted })
 
 function EndpointsSection({ e, short }: { e: EndpointSummary; short: (iso: string) => string }) {
+  const p = useChartPalette()
+  const AXIS = chartAxis(p), TOOLTIP = chartTooltip(p), GRID = p.grid
+  const CONN_COLORS = connColors(p)
+  const OS_COLORS = p.series
   const conn = [
     { name: 'Online', value: e.online }, { name: 'Offline', value: e.offline }, { name: 'Never reported', value: e.never_reported },
   ].filter((x) => x.value > 0) as { name: keyof typeof CONN_COLORS; value: number }[]
@@ -65,7 +60,7 @@ function EndpointsSection({ e, short }: { e: EndpointSummary; short: (iso: strin
                 <XAxis dataKey="date" tickFormatter={short} {...AXIS} />
                 <YAxis allowDecimals={false} width={28} {...AXIS} />
                 <Tooltip {...TOOLTIP} labelFormatter={(v) => short(String(v))} />
-                <Bar dataKey="count" name="Enrolled" fill="#38bdf8" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="count" name="Enrolled" fill={p.series[1]} stroke={p.stroke} strokeWidth={p.strokeWidth} radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -76,7 +71,7 @@ function EndpointsSection({ e, short }: { e: EndpointSummary; short: (iso: strin
             {conn.length === 0 ? <EmptyState icon={Laptop} title="No managed endpoints" action={<Button asChild size="sm" variant="secondary"><Link to="/endpoints">Enrol endpoints</Link></Button>} /> : (
               <div className="flex h-full items-center">
                 <ResponsiveContainer width="55%">
-                  <PieChart><Pie data={conn} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="85%" paddingAngle={2} stroke="none">
+                  <PieChart><Pie data={conn} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="85%" paddingAngle={2} stroke={p.stroke} strokeWidth={p.strokeWidth}>
                     {conn.map((c) => <Cell key={c.name} fill={CONN_COLORS[c.name]} />)}</Pie><Tooltip {...TOOLTIP} /></PieChart>
                 </ResponsiveContainer>
                 <ul className="space-y-2 text-xs">{conn.map((c) => (
@@ -109,10 +104,14 @@ function EndpointsSection({ e, short }: { e: EndpointSummary; short: (iso: strin
   )
 }
 
-const COMP_COLORS = { Compliant: '#10b981', 'Non-compliant': '#ef4444', 'Unknown (not compliant)': '#f59e0b' } as const
-const DEP_COLORS: Record<string, string> = { applied: '#10b981', failed: '#ef4444', needs_attention: '#f59e0b', pending: '#38bdf8', in_progress: '#38bdf8', offline: '#64748b', revoked: '#5f646b' }
+const compColors = (p: ChartPalette): Record<'Compliant' | 'Non-compliant' | 'Unknown (not compliant)', string> => ({ Compliant: p.ok, 'Non-compliant': p.bad, 'Unknown (not compliant)': p.warn })
+const depColors = (p: ChartPalette): Record<string, string> => ({ applied: p.ok, failed: p.bad, needs_attention: p.warn, pending: p.info, in_progress: p.info, offline: p.neutral, revoked: p.muted })
 
 function SecuritySection({ c, p, short }: { c: ComplianceDash | ModuleStatus; p: PolicyDash | ModuleStatus; short: (iso: string) => string }) {
+  const cp = useChartPalette()
+  const AXIS = chartAxis(cp), TOOLTIP = chartTooltip(cp), GRID = cp.grid
+  const COMP_COLORS = compColors(cp)
+  const DEP_COLORS = depColors(cp)
   const comp = c.available ? ([
     { name: 'Compliant', value: c.compliant }, { name: 'Non-compliant', value: c.non_compliant }, { name: 'Unknown (not compliant)', value: c.unknown },
   ] as const).filter((x) => x.value > 0) : []
@@ -137,7 +136,7 @@ function SecuritySection({ c, p, short }: { c: ComplianceDash | ModuleStatus; p:
           <div className="h-56 px-2 py-3">
             {!comp.length ? <EmptyState icon={ShieldCheck} title="No evaluations yet" /> : (
               <div className="flex h-full items-center">
-                <ResponsiveContainer width="55%"><PieChart><Pie data={[...comp]} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="85%" paddingAngle={2} stroke="none">
+                <ResponsiveContainer width="55%"><PieChart><Pie data={[...comp]} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="85%" paddingAngle={2} stroke={cp.stroke} strokeWidth={cp.strokeWidth}>
                   {comp.map((x) => <Cell key={x.name} fill={COMP_COLORS[x.name]} />)}</Pie><Tooltip {...TOOLTIP} /></PieChart></ResponsiveContainer>
                 <ul className="space-y-2 text-xs">{comp.map((x) => (
                   <li key={x.name} className="flex items-center gap-2"><span className="size-2 rounded-sm" style={{ background: COMP_COLORS[x.name] }} />
@@ -156,7 +155,7 @@ function SecuritySection({ c, p, short }: { c: ComplianceDash | ModuleStatus; p:
                   <XAxis dataKey="status" {...AXIS} />
                   <YAxis allowDecimals={false} width={28} {...AXIS} />
                   <Tooltip {...TOOLTIP} />
-                  <Bar dataKey="count" name="Deployments" radius={[3, 3, 0, 0]}>{deps.map((x) => <Cell key={x.key} fill={DEP_COLORS[x.key] ?? '#94a3b8'} />)}</Bar>
+                  <Bar dataKey="count" name="Deployments" radius={[3, 3, 0, 0]}>{deps.map((x) => <Cell key={x.key} fill={DEP_COLORS[x.key] ?? cp.series[4]} stroke={cp.stroke} strokeWidth={cp.strokeWidth} />)}</Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -172,7 +171,7 @@ function SecuritySection({ c, p, short }: { c: ComplianceDash | ModuleStatus; p:
                   <XAxis dataKey="date" tickFormatter={short} {...AXIS} />
                   <YAxis domain={[0, 100]} width={30} {...AXIS} />
                   <Tooltip {...TOOLTIP} labelFormatter={(v) => short(String(v))} />
-                  <Line type="monotone" dataKey="average_score" name="Avg score %" stroke="#10b981" strokeWidth={1.75} dot={{ r: 2 }} connectNulls />
+                  <Line type="monotone" dataKey="average_score" name="Avg score %" stroke={cp.ok} strokeWidth={1.75} dot={{ r: 2 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             )}
@@ -184,9 +183,12 @@ function SecuritySection({ c, p, short }: { c: ComplianceDash | ModuleStatus; p:
 }
 
 interface AlertsDash { available: true; open_total: number; unassigned: number; open_by_severity: Record<string, number>; detected_by_day: { date: string; count: number }[] }
-const SEV_COLORS: Record<string, string> = { critical: '#dc2626', high: '#f97316', medium: '#f59e0b', low: '#38bdf8', informational: '#64748b' }
+const sevColors = (p: ChartPalette): Record<string, string> => ({ critical: p.crit, high: p.high, medium: p.warn, low: p.info, informational: p.neutral })
 
 function AlertsSection({ a, short }: { a: AlertsDash; short: (iso: string) => string }) {
+  const cp = useChartPalette()
+  const AXIS = chartAxis(cp), TOOLTIP = chartTooltip(cp), GRID = cp.grid
+  const SEV_COLORS = sevColors(cp)
   const sev = Object.entries(a.open_by_severity).map(([k, v]) => ({ severity: k, count: v }))
   return (
     <div className="grid gap-3 xl:grid-cols-3 [&>*]:min-w-0">
@@ -200,7 +202,7 @@ function AlertsSection({ a, short }: { a: AlertsDash; short: (iso: string) => st
         <div className="h-48 px-2 py-3">
           {!a.open_total ? <EmptyState icon={ShieldCheck} title="No open alerts" /> : (
             <ResponsiveContainer><BarChart data={sev}><CartesianGrid stroke={GRID} vertical={false} /><XAxis dataKey="severity" {...AXIS} /><YAxis allowDecimals={false} width={28} {...AXIS} /><Tooltip {...TOOLTIP} />
-              <Bar dataKey="count" name="Open" radius={[3, 3, 0, 0]}>{sev.map((s) => <Cell key={s.severity} fill={SEV_COLORS[s.severity]} />)}</Bar></BarChart></ResponsiveContainer>
+              <Bar dataKey="count" name="Open" radius={[3, 3, 0, 0]}>{sev.map((s) => <Cell key={s.severity} fill={SEV_COLORS[s.severity]} stroke={cp.stroke} strokeWidth={cp.strokeWidth} />)}</Bar></BarChart></ResponsiveContainer>
           )}
         </div>
       </Card>
@@ -208,7 +210,7 @@ function AlertsSection({ a, short }: { a: AlertsDash; short: (iso: string) => st
         <CardHeader title="Alerts detected" description="Per day, last 14 days" />
         <div className="h-48 px-2 py-3">
           <ResponsiveContainer><AreaChart data={a.detected_by_day}><CartesianGrid stroke={GRID} vertical={false} /><XAxis dataKey="date" tickFormatter={short} {...AXIS} /><YAxis allowDecimals={false} width={28} {...AXIS} />
-            <Tooltip {...TOOLTIP} labelFormatter={(v) => short(String(v))} /><Area type="monotone" dataKey="count" name="Alerts" stroke="#f97316" fill="#f9731622" strokeWidth={1.5} /></AreaChart></ResponsiveContainer>
+            <Tooltip {...TOOLTIP} labelFormatter={(v) => short(String(v))} /><Area type="monotone" dataKey="count" name="Alerts" stroke={cp.high} fill={cp.high} fillOpacity={0.13} strokeWidth={1.5} /></AreaChart></ResponsiveContainer>
         </div>
       </Card>
     </div>
@@ -217,6 +219,9 @@ function AlertsSection({ a, short }: { a: AlertsDash; short: (iso: string) => st
 
 export function DashboardPage() {
   const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get<DashboardSummary>('/dashboard/summary'), refetchInterval: 60_000 })
+  const cp = useChartPalette()
+  const AXIS = chartAxis(cp), TOOLTIP = chartTooltip(cp), GRID = cp.grid
+  const STATUS_COLORS = [cp.ok, cp.info, cp.warn, cp.muted]
 
   if (q.isLoading) return <div className="grid h-64 place-items-center"><Spinner /></div>
   if (q.error) return <Alert>{describeError(q.error)}</Alert>
@@ -238,7 +243,7 @@ export function DashboardPage() {
       <FleetOverview d={d} />
 
       <h2 className="pt-2 text-lg font-semibold text-silver-50">Workforce and identity</h2>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="cage-stagger grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi label="Active employees" value={d.employees.active} icon={Users} />
         <Kpi label="Suspended employees" value={d.employees.suspended} icon={UserMinus} tone={d.employees.suspended ? 'warn' : undefined} />
         <Kpi label="Offboarded" value={d.employees.offboarded} icon={UserCheck} />
@@ -259,8 +264,8 @@ export function DashboardPage() {
                   <XAxis dataKey="date" tickFormatter={short} {...AXIS} />
                   <YAxis allowDecimals={false} width={28} {...AXIS} />
                   <Tooltip {...TOOLTIP} labelFormatter={(v) => short(String(v))} />
-                  <Bar dataKey="success" name="Successful" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="failure" name="Failed" stackId="a" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="success" name="Successful" stackId="a" fill={cp.ok} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="failure" name="Failed" stackId="a" fill={cp.bad} radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -275,7 +280,7 @@ export function DashboardPage() {
               <div className="flex h-full items-center">
                 <ResponsiveContainer width="55%">
                   <PieChart>
-                    <Pie data={statusData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="85%" paddingAngle={2} stroke="none">
+                    <Pie data={statusData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="85%" paddingAngle={2} stroke={cp.stroke} strokeWidth={cp.strokeWidth}>
                       {statusData.map((s) => <Cell key={s.name} fill={STATUS_COLORS[['Active', 'Invited', 'Suspended', 'Offboarded'].indexOf(s.name)]} />)}
                     </Pie>
                     <Tooltip {...TOOLTIP} />
@@ -306,7 +311,7 @@ export function DashboardPage() {
                   <XAxis type="number" allowDecimals={false} {...AXIS} />
                   <YAxis type="category" dataKey="department" width={96} {...AXIS} />
                   <Tooltip {...TOOLTIP} />
-                  <Bar dataKey="count" name="Employees" fill="#34d399" radius={[0, 3, 3, 0]} barSize={14} />
+                  <Bar dataKey="count" name="Employees" fill={cp.series[0]} stroke={cp.stroke} strokeWidth={cp.strokeWidth} radius={[0, 3, 3, 0]} barSize={14} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -317,12 +322,12 @@ export function DashboardPage() {
           <div className="h-60 px-2 py-3">
             <ResponsiveContainer>
               <AreaChart data={d.employees.joiners_by_day}>
-                <defs><linearGradient id="j" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.25} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient></defs>
+                <defs><linearGradient id="j" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={cp.ok} stopOpacity={0.25} /><stop offset="100%" stopColor={cp.ok} stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid stroke={GRID} vertical={false} />
                 <XAxis dataKey="date" tickFormatter={short} {...AXIS} />
                 <YAxis allowDecimals={false} width={28} {...AXIS} />
                 <Tooltip {...TOOLTIP} labelFormatter={(v) => short(String(v))} />
-                <Area type="monotone" dataKey="count" name="Joiners" stroke="#10b981" fill="url(#j)" strokeWidth={1.5} />
+                <Area type="monotone" dataKey="count" name="Joiners" stroke={cp.ok} fill="url(#j)" strokeWidth={1.5} />
               </AreaChart>
             </ResponsiveContainer>
           </div>

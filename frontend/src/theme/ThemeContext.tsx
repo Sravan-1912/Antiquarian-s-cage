@@ -4,11 +4,13 @@ export type ThemeId =
   | 'liquid-glass' | 'custom-wallpaper' | 'obsidian' | 'tokyo-night' | 'catppuccin-mocha' | 'cyberpunk'
   | 'nordic' | 'dracula' | 'gruvbox' | 'alabaster'
   | 'velvet-burgundy' | 'crimson-glass' | 'cabernet-noir' | 'scarlet-ops' | 'garnet-champagne'
+  | 'neumorphism' | 'claymorphism' | 'neobrutalism' | 'swiss-dark' | 'material-you' | 'skeuomorphism'
+  | 'cyberpunk-noir' | 'aurora-mesh' | 'terminal-tui' | 'frutiger-aero' | 'retro-95'
 
 export interface ThemeDef {
   id: ThemeId
   name: string
-  group: 'Signature' | 'Dark' | 'Light' | 'Red & Burgundy'
+  group: 'Signature' | 'Dark' | 'Light' | 'Red & Burgundy' | 'Design Styles'
   /** [canvas, surface, accent, text] for the live preview card. */
   swatch: [string, string, string, string]
   glass?: boolean
@@ -31,6 +33,17 @@ export const THEMES: ThemeDef[] = [
   { id: 'cabernet-noir', name: 'Cabernet Noir', group: 'Red & Burgundy', swatch: ['#120e14', '#1f131a', '#a32938', '#e3c9cd'] },
   { id: 'scarlet-ops', name: 'Scarlet Ops', group: 'Red & Burgundy', swatch: ['#08080a', '#121216', '#ef233c', '#e3e3e8'] },
   { id: 'garnet-champagne', name: 'Garnet & Champagne', group: 'Light', light: true, swatch: ['#fbf7f4', '#ffffff', '#7a1626', '#26181a'] },
+  { id: 'neumorphism', name: 'Neumorphism · Soft UI', group: 'Design Styles', light: true, swatch: ['#e4e9f2', '#e9edf5', '#5b7cfa', '#2b3444'] },
+  { id: 'claymorphism', name: 'Claymorphism', group: 'Design Styles', light: true, swatch: ['#eef0ff', '#f3f4ff', '#7c6cf0', '#322f55'] },
+  { id: 'neobrutalism', name: 'Neobrutalism', group: 'Design Styles', light: true, swatch: ['#fdf6e3', '#ffffff', '#ff5c8a', '#0a0a0a'] },
+  { id: 'swiss-dark', name: 'Minimalist · Swiss Dark', group: 'Design Styles', swatch: ['#09090b', '#111113', '#6366f1', '#ededed'] },
+  { id: 'material-you', name: 'Material You', group: 'Design Styles', light: true, swatch: ['#f6f7f2', '#ecefe6', '#5c7a3f', '#272a22'] },
+  { id: 'skeuomorphism', name: 'Skeuomorphism', group: 'Design Styles', swatch: ['#1b1d20', '#26282c', '#6ea0e0', '#e3e5e8'] },
+  { id: 'cyberpunk-noir', name: 'Cyberpunk · Neon Noir', group: 'Design Styles', glass: true, swatch: ['#070510', 'rgba(15,10,30,0.85)', '#00f0ff', '#cdfaff'] },
+  { id: 'aurora-mesh', name: 'Aurora · Mesh Gradient', group: 'Design Styles', glass: true, swatch: ['#0a0f1f', 'rgba(15,23,42,0.62)', '#a78bfa', '#e6ecfb'] },
+  { id: 'terminal-tui', name: 'Terminal · TUI', group: 'Design Styles', swatch: ['#000000', '#030703', '#00ff66', '#9dffb4'] },
+  { id: 'frutiger-aero', name: 'Frutiger Aero', group: 'Design Styles', glass: true, light: true, swatch: ['#2bb3d6', 'rgba(255,255,255,0.72)', '#00b4d8', '#0c3346'] },
+  { id: 'retro-95', name: 'Retro OS 95', group: 'Design Styles', light: true, swatch: ['#008080', '#c0c0c0', '#000080', '#000000'] },
 ]
 
 export const DEFAULT_THEME: ThemeId = 'liquid-glass'

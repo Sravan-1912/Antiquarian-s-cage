@@ -7,6 +7,7 @@ import './theme/themes.css'  // after index.css so [data-theme] overrides win in
 import './theme/controls.css' // theme-driven button/input material
 import { ThemeProvider } from '@/theme/ThemeContext'
 import { ThemesPage } from '@/modules/settings/ThemesPage'
+import { StartupLoader } from '@/components/StartupLoader'
 import { AuthProvider, useAuth } from '@/hooks/useAuth'
 import { AppShell } from '@/layouts/AppShell'
 import { Spinner } from '@/components/ui/primitives'
@@ -79,6 +80,7 @@ function NotFound() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <StartupLoader />
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
       <BrowserRouter>
