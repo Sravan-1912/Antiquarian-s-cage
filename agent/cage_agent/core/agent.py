@@ -149,6 +149,14 @@ class Agent:
         except Exception as exc:  # noqa: BLE001 - telemetry is best-effort; never take the agent down
             log.debug("telemetry collection skipped: %s", exc)
             return
+        rem = getattr(self, "_removable", None)
+        if rem is None:
+            from cage_agent.collectors.removable import RemovableStorage
+            rem = self._removable = RemovableStorage()
+        try:
+            events = events + rem.collect()  # newly-connected removable/USB storage
+        except Exception as exc:  # noqa: BLE001
+            log.debug("removable collection skipped: %s", exc)
         if events:
             self.client.telemetry(self.key, {"events": events})
 

@@ -35,6 +35,7 @@ class Rule:
     conditions: tuple[Cond, ...]
     description: str = ""
     key_field: str = "name"   # which event field distinguishes occurrences (for alert dedup)
+    alert_key: str = "edr_detection"  # which alert rule key this raises (defaults to the generic EDR detection)
 
 
 def _get(data: dict, path: str):
@@ -101,6 +102,11 @@ RULES: tuple[Rule, ...] = (
          (Cond("cmdline", "iregex", r"Set-MpPreference\s+.*-Disable|netsh\s+advfirewall\s+set\s+allprofiles\s+state\s+off|Stop-Service\s+.*WinDefend"),),
          "Command line attempts to disable Microsoft Defender or the firewall.",
          key_field="cmdline"),
+    # Removable-media logging (DLP-lite): the agent reports each newly-connected USB/removable volume.
+    Rule("usb_storage", "USB storage connected", "low", "usb_storage",
+         (),  # no conditions — any removable volume insertion
+         "A removable USB storage device was connected to the endpoint.",
+         key_field="serial", alert_key="usb_storage_connected"),
 )
 
 
@@ -121,7 +127,7 @@ def ingest(db: Session, device: Device, events: list[dict], rules: tuple[Rule, .
         for rule in evaluate(ev, rules):
             key = str(_get(data, rule.key_field) or "")[:120]
             alerts.raise_alert(
-                db, device.organization_id, "edr_detection",
+                db, device.organization_id, rule.alert_key,
                 title=f"{rule.title} on {device.hostname}", description=rule.description, severity=rule.severity,
                 dedup_key=f"edr:{device.id}:{rule.id}:{key}", device_id=device.id,
                 evidence={"rule": rule.id, "event_type": ev.get("type"), "event": data})
