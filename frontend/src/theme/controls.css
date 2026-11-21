@@ -13,6 +13,8 @@
   --btn-ghost-text: var(--color-silver-400); --btn-ghost-bg-hover: var(--color-ink-700);
   --btn-outline-border: var(--color-ink-600); --btn-outline-text: var(--color-silver-200); --btn-outline-bg-hover: var(--color-ink-700); --btn-outline-bg: transparent;
   --input-bg: var(--color-ink-900); --input-border: var(--color-ink-600); --input-border-focus: var(--cage-accent); --input-text: var(--color-silver-100); --input-shadow: none;
+  /* Native <option> popups are OS-painted and ignore translucent/blur backgrounds, so they need a SOLID bg + text. */
+  --option-bg: #1b1e27; --option-text: #eef1f8;
 }
 
 .cage-btn {
@@ -43,6 +45,26 @@
 }
 .cage-input:focus, .cage-input:focus-visible { outline: none; border-color: var(--input-border-focus);
   box-shadow: var(--input-shadow, none), 0 0 0 3px color-mix(in srgb, var(--cage-accent) 26%, transparent); }
+/* The dropdown list: solid, readable in every theme (fixes invisible light-on-white option text). */
+.cage-input option, .cage-input optgroup { background-color: var(--option-bg); color: var(--option-text); }
+.cage-input optgroup { font-weight: 600; }
+/* Light themes: dark text on a light option list. */
+[data-theme="alabaster"], [data-theme="garnet-champagne"], [data-theme="neumorphism"], [data-theme="claymorphism"],
+[data-theme="neobrutalism"], [data-theme="material-you"], [data-theme="frutiger-aero"], [data-theme="retro-95"] {
+  --option-bg: #ffffff; --option-text: #17181c;
+}
+/* A few dark themes read best with their own tinted option list. */
+[data-theme="tokyo-night"] { --option-bg: #1f2130; --option-text: #c0caf5; }
+[data-theme="catppuccin-mocha"] { --option-bg: #242436; --option-text: #cdd6f4; }
+[data-theme="dracula"] { --option-bg: #2d2f3d; --option-text: #f8f8f2; }
+[data-theme="gruvbox"] { --option-bg: #32302f; --option-text: #ebdbb2; }
+[data-theme="nordic"] { --option-bg: #343b48; --option-text: #e5e9f0; }
+[data-theme="obsidian"] { --option-bg: #141418; --option-text: #e4e4e7; }
+[data-theme="terminal-tui"] { --option-bg: #000000; --option-text: #9dffb4; }
+[data-theme="cyberpunk"], [data-theme="cyberpunk-noir"] { --option-bg: #120a24; --option-text: #cdfaff; }
+[data-theme="velvet-burgundy"], [data-theme="crimson-glass"], [data-theme="cabernet-noir"] { --option-bg: #1c0a12; --option-text: #f6d3da; }
+[data-theme="scarlet-ops"], [data-theme="skeuomorphism"] { --option-bg: #16161a; --option-text: #e3e3e8; }
+[data-theme="aurora-mesh"] { --option-bg: #141a2e; --option-text: #e6ecfb; }
 
 /* ========================================================= iOS-26 Liquid Glass (glass family) */
 [data-theme="liquid-glass"], [data-theme="custom-wallpaper"], [data-theme="crimson-glass"] {
