@@ -50,8 +50,15 @@ export const DEFAULT_THEME: ThemeId = 'liquid-glass'
 const KEY = 'cage-theme'
 const WP_KEY = 'cage-wallpaper-cfg'
 
-export interface WallpaperCfg { blur: number; tint: number; dim: number; hasImage: boolean }
-const DEFAULT_WP: WallpaperCfg = { blur: 24, tint: 0.55, dim: 0.35, hasImage: false }
+export interface WallpaperCfg {
+  /** card backdrop blur (px) */ blur: number
+  /** background-image blur (px) */ bgBlur: number
+  /** card surface opacity 0..1 (higher = more solid) */ tint: number
+  /** wallpaper darkening 0..1 */ dim: number
+  /** glass saturation % */ saturation: number
+  hasImage: boolean
+}
+const DEFAULT_WP: WallpaperCfg = { blur: 24, bgBlur: 8, tint: 0.55, dim: 0.35, saturation: 160, hasImage: false }
 
 // --- tiny IndexedDB store for the (large) wallpaper image, so it never hits localStorage quota ---
 function idb(): Promise<IDBDatabase> {
@@ -73,9 +80,18 @@ function readWp(): WallpaperCfg { try { return { ...DEFAULT_WP, ...JSON.parse(lo
 
 function applyWpVars(cfg: WallpaperCfg) {
   const r = document.documentElement.style
-  r.setProperty('--cage-wallpaper-blur', `${cfg.blur}px`)
+  r.setProperty('--cage-glass-blur', `${cfg.blur}px`)
+  r.setProperty('--cage-wallpaper-blur', `${cfg.bgBlur}px`)
   r.setProperty('--cage-glass-tint', `rgba(18,19,22,${cfg.tint})`)
   r.setProperty('--cage-wallpaper-dim', String(cfg.dim))
+  r.setProperty('--cage-glass-sat', `${cfg.saturation}%`)
+}
+
+/** The wallpaper image only backs the "Liquid Glass — Wallpaper" theme; flag it on <html> for the CSS. */
+function applyWallpaperState(cfg: WallpaperCfg, theme: ThemeId) {
+  const root = document.documentElement
+  if (cfg.hasImage && theme === 'custom-wallpaper') root.dataset.wallpaperActive = '1'
+  else delete root.dataset.wallpaperActive
 }
 
 let currentWpUrl: string | null = null
@@ -102,6 +118,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
   useEffect(() => { applyWpVars(wallpaper); loadWallpaperImage() }, [])
+  useEffect(() => { applyWallpaperState(wallpaper, theme) }, [wallpaper, theme])
 
   const setTheme = useCallback((id: ThemeId, origin?: { x: number; y: number }) => {
     const root = document.documentElement
@@ -122,7 +139,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Ctx>(() => ({ theme, setTheme, wallpaper, setWallpaperCfg, uploadWallpaper, removeWallpaper }),
     [theme, setTheme, wallpaper, setWallpaperCfg, uploadWallpaper, removeWallpaper])
-  return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>
+  const showLayer = wallpaper.hasImage && theme === 'custom-wallpaper'
+  return (
+    <ThemeCtx.Provider value={value}>
+      {showLayer && <div className="cage-wallpaper-layer" aria-hidden />}
+      {children}
+    </ThemeCtx.Provider>
+  )
 }
 
 export function useTheme() {

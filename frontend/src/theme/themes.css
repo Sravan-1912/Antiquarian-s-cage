@@ -6,9 +6,29 @@
 :root {
   --cage-accent: #34d399;
   --cage-wallpaper: none;
-  --cage-wallpaper-blur: 24px;
+  --cage-wallpaper-blur: 8px;   /* background-image blur */
+  --cage-glass-blur: 24px;      /* card backdrop blur */
+  --cage-glass-sat: 160%;       /* card backdrop saturation */
   --cage-glass-tint: rgba(18, 19, 22, 0.55);
   --cage-wallpaper-dim: 0.35;
+}
+
+/* Global wallpaper layer — shows the uploaded image behind the whole app (wallpaper theme, or any theme when
+   "apply to all" is on). Cards frost over it via the [data-wallpaper-active] rules below. */
+.cage-wallpaper-layer {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: var(--cage-wallpaper); background-size: cover; background-position: center; background-repeat: no-repeat;
+  filter: blur(var(--cage-wallpaper-blur)); transform: scale(1.08); will-change: filter;
+}
+.cage-wallpaper-layer::after { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, var(--cage-wallpaper-dim)); }
+html[data-wallpaper-active="1"] body { background: transparent !important; }
+/* When a wallpaper backs the app, turn every theme's cards into frosted glass so the image shows through. */
+html[data-wallpaper-active="1"] [class*="bg-ink-9"], html[data-wallpaper-active="1"] [class*="bg-ink-8"] {
+  background: var(--cage-glass-tint) !important;
+  backdrop-filter: blur(var(--cage-glass-blur)) saturate(var(--cage-glass-sat)) !important;
+  -webkit-backdrop-filter: blur(var(--cage-glass-blur)) saturate(var(--cage-glass-sat)) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.16), 0 10px 40px -12px rgba(0, 0, 0, 0.55) !important;
 }
 
 /* Smooth cross-fade fallback where View Transitions aren't available. */
@@ -68,7 +88,7 @@ html { transition: none; }
   background-size: cover; background-position: center;
 }
 [data-theme="custom-wallpaper"] .bg-ink-900, [data-theme="custom-wallpaper"] .bg-ink-850, [data-theme="custom-wallpaper"] .bg-ink-800 {
-  backdrop-filter: blur(var(--cage-wallpaper-blur)) saturate(170%); -webkit-backdrop-filter: blur(var(--cage-wallpaper-blur)) saturate(170%);
+  backdrop-filter: blur(var(--cage-glass-blur)) saturate(var(--cage-glass-sat)); -webkit-backdrop-filter: blur(var(--cage-glass-blur)) saturate(var(--cage-glass-sat));
 }
 
 /* ============================================================== 3. Antiquarian Obsidian (OLED) */

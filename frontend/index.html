@@ -7,16 +7,19 @@
     <meta name="color-scheme" content="dark" />
     <title>Antiquarian's Cage</title>
     <script>
-      // Apply the saved theme before first paint (zero flash).
+      // Apply the saved theme + wallpaper before first paint (zero flash).
       (function () {
         try {
+          var root = document.documentElement, s = root.style;
           var t = localStorage.getItem('cage-theme') || 'liquid-glass';
-          document.documentElement.dataset.theme = t;
+          root.dataset.theme = t;
           var wp = JSON.parse(localStorage.getItem('cage-wallpaper-cfg') || '{}');
-          var s = document.documentElement.style;
-          if (wp.blur) s.setProperty('--cage-wallpaper-blur', wp.blur + 'px');
+          if (wp.blur != null) s.setProperty('--cage-glass-blur', wp.blur + 'px');
+          if (wp.bgBlur != null) s.setProperty('--cage-wallpaper-blur', wp.bgBlur + 'px');
           if (wp.tint != null) s.setProperty('--cage-glass-tint', 'rgba(18,19,22,' + wp.tint + ')');
           if (wp.dim != null) s.setProperty('--cage-wallpaper-dim', String(wp.dim));
+          if (wp.saturation != null) s.setProperty('--cage-glass-sat', wp.saturation + '%');
+          if (wp.hasImage && t === 'custom-wallpaper') root.dataset.wallpaperActive = '1';
         } catch (e) {}
       })();
     </script>

@@ -50,7 +50,8 @@ function Slider({ label, value, min, max, step, suffix, onChange }: { label: str
 }
 
 function WallpaperStudio() {
-  const { wallpaper, setWallpaperCfg, uploadWallpaper, removeWallpaper } = useTheme()
+  const { theme, setTheme, wallpaper, setWallpaperCfg, uploadWallpaper, removeWallpaper } = useTheme()
+  const onWallpaperTheme = theme === 'custom-wallpaper'
   const fileRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -63,8 +64,14 @@ function WallpaperStudio() {
 
   return (
     <Card>
-      <CardHeader title="Wallpaper Studio" description="Upload any image for the Liquid Glass surface; tune how the frosted cards sit over it." />
+      <CardHeader title="Wallpaper Studio" description="Upload an image for the Liquid Glass — Wallpaper theme, then tune the frosted-glass surfaces that float over it." />
       <div className="space-y-4 p-4">
+        {!onWallpaperTheme && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-ink-700 bg-ink-850 px-3.5 py-3">
+            <span className="text-xs text-silver-400">The wallpaper only shows on the <span className="text-silver-200">Liquid Glass — Wallpaper</span> theme. Your image and settings are saved either way.</span>
+            <Button size="sm" variant="secondary" className="shrink-0" onClick={(e) => setTheme('custom-wallpaper', { x: e.clientX, y: e.clientY })}>Switch to it</Button>
+          </div>
+        )}
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
@@ -78,10 +85,15 @@ function WallpaperStudio() {
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void take(e.target.files?.[0])} />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Slider label="Glass blur" value={wallpaper.blur} min={8} max={40} step={1} suffix="px" onChange={(v) => setWallpaperCfg({ blur: v })} />
-          <Slider label="Surface tint" value={Math.round(wallpaper.tint * 100)} min={10} max={90} step={1} suffix="%" onChange={(v) => setWallpaperCfg({ tint: v / 100 })} />
-          <Slider label="Wallpaper dim" value={Math.round(wallpaper.dim * 100)} min={0} max={85} step={1} suffix="%" onChange={(v) => setWallpaperCfg({ dim: v / 100 })} />
+        <div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-silver-600">Liquid-glass controls</div>
+          <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Slider label="Glass blur" value={wallpaper.blur} min={0} max={40} step={1} suffix="px" onChange={(v) => setWallpaperCfg({ blur: v })} />
+            <Slider label="Background blur" value={wallpaper.bgBlur} min={0} max={40} step={1} suffix="px" onChange={(v) => setWallpaperCfg({ bgBlur: v })} />
+            <Slider label="Surface opacity" value={Math.round(wallpaper.tint * 100)} min={8} max={95} step={1} suffix="%" onChange={(v) => setWallpaperCfg({ tint: v / 100 })} />
+            <Slider label="Saturation" value={wallpaper.saturation} min={100} max={220} step={5} suffix="%" onChange={(v) => setWallpaperCfg({ saturation: v })} />
+            <Slider label="Wallpaper dim" value={Math.round(wallpaper.dim * 100)} min={0} max={85} step={1} suffix="%" onChange={(v) => setWallpaperCfg({ dim: v / 100 })} />
+          </div>
         </div>
 
         {wallpaper.hasImage && (
@@ -120,7 +132,7 @@ export function ThemesPage() {
         )
       })}
 
-      {theme === 'custom-wallpaper' && <WallpaperStudio />}
+      <WallpaperStudio />
     </div>
   )
 }
