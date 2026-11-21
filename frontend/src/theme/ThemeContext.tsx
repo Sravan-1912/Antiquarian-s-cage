@@ -56,9 +56,10 @@ export interface WallpaperCfg {
   /** card surface opacity 0..1 (higher = more solid) */ tint: number
   /** wallpaper darkening 0..1 */ dim: number
   /** glass saturation % */ saturation: number
-  hasImage: boolean
+  /** what kind of media is stored */ mediaKind: 'image' | 'video'
+  /** has media (image or video) stored */ hasImage: boolean
 }
-const DEFAULT_WP: WallpaperCfg = { blur: 24, bgBlur: 8, tint: 0.55, dim: 0.35, saturation: 160, hasImage: false }
+const DEFAULT_WP: WallpaperCfg = { blur: 24, bgBlur: 8, tint: 0.55, dim: 0.35, saturation: 160, mediaKind: 'image', hasImage: false }
 
 // --- tiny IndexedDB store for the (large) wallpaper image, so it never hits localStorage quota ---
 function idb(): Promise<IDBDatabase> {
@@ -95,11 +96,17 @@ function applyWallpaperState(cfg: WallpaperCfg, theme: ThemeId) {
 }
 
 let currentWpUrl: string | null = null
-async function loadWallpaperImage() {
+/** Load the stored image/video blob, return a fresh object URL (also mirrored to --cage-wallpaper for the image div). */
+async function loadWallpaperMedia(): Promise<string | null> {
   const blob = await wpGet()
   if (currentWpUrl) { URL.revokeObjectURL(currentWpUrl); currentWpUrl = null }
-  if (blob) { currentWpUrl = URL.createObjectURL(blob); document.documentElement.style.setProperty('--cage-wallpaper', `url("${currentWpUrl}")`) }
-  else document.documentElement.style.setProperty('--cage-wallpaper', 'none')
+  if (blob) {
+    currentWpUrl = URL.createObjectURL(blob)
+    document.documentElement.style.setProperty('--cage-wallpaper', `url("${currentWpUrl}")`)
+    return currentWpUrl
+  }
+  document.documentElement.style.setProperty('--cage-wallpaper', 'none')
+  return null
 }
 
 interface Ctx {
@@ -109,15 +116,17 @@ interface Ctx {
   setWallpaperCfg: (patch: Partial<WallpaperCfg>) => void
   uploadWallpaper: (file: File) => Promise<void>
   removeWallpaper: () => Promise<void>
+  /** object URL of the stored image/video, or null */ mediaUrl: string | null
 }
 const ThemeCtx = createContext<Ctx | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>(readTheme)
   const [wallpaper, setWallpaper] = useState<WallpaperCfg>(readWp)
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null)
 
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
-  useEffect(() => { applyWpVars(wallpaper); loadWallpaperImage() }, [])
+  useEffect(() => { applyWpVars(wallpaper); void loadWallpaperMedia().then(setMediaUrl) }, [])
   useEffect(() => { applyWallpaperState(wallpaper, theme) }, [wallpaper, theme])
 
   const setTheme = useCallback((id: ThemeId, origin?: { x: number; y: number }) => {
@@ -134,15 +143,30 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const setWallpaperCfg = useCallback((patch: Partial<WallpaperCfg>) => {
     setWallpaper((prev) => { const next = { ...prev, ...patch }; applyWpVars(next); try { localStorage.setItem(WP_KEY, JSON.stringify(next)) } catch { /* ignore */ } return next })
   }, [])
-  const uploadWallpaper = useCallback(async (file: File) => { await wpPut(file); await loadWallpaperImage(); setWallpaperCfg({ hasImage: true }) }, [setWallpaperCfg])
-  const removeWallpaper = useCallback(async () => { await wpDel(); await loadWallpaperImage(); setWallpaperCfg({ hasImage: false }) }, [setWallpaperCfg])
+  const uploadWallpaper = useCallback(async (file: File) => {
+    await wpPut(file)
+    setMediaUrl(await loadWallpaperMedia())
+    setWallpaperCfg({ hasImage: true, mediaKind: file.type.startsWith('video/') ? 'video' : 'image' })
+  }, [setWallpaperCfg])
+  const removeWallpaper = useCallback(async () => {
+    await wpDel()
+    setMediaUrl(await loadWallpaperMedia())
+    setWallpaperCfg({ hasImage: false })
+  }, [setWallpaperCfg])
 
-  const value = useMemo<Ctx>(() => ({ theme, setTheme, wallpaper, setWallpaperCfg, uploadWallpaper, removeWallpaper }),
-    [theme, setTheme, wallpaper, setWallpaperCfg, uploadWallpaper, removeWallpaper])
+  const value = useMemo<Ctx>(() => ({ theme, setTheme, wallpaper, setWallpaperCfg, uploadWallpaper, removeWallpaper, mediaUrl }),
+    [theme, setTheme, wallpaper, setWallpaperCfg, uploadWallpaper, removeWallpaper, mediaUrl])
   const showLayer = wallpaper.hasImage && theme === 'custom-wallpaper'
   return (
     <ThemeCtx.Provider value={value}>
-      {showLayer && <div className="cage-wallpaper-layer" aria-hidden />}
+      {showLayer && (
+        <div className="cage-wallpaper-layer" aria-hidden>
+          {wallpaper.mediaKind === 'video' && mediaUrl
+            ? <video className="cage-wallpaper-media" src={mediaUrl} autoPlay loop muted playsInline />
+            : <div className="cage-wallpaper-media cage-wallpaper-image" />}
+          <div className="cage-wallpaper-dim" />
+        </div>
+      )}
       {children}
     </ThemeCtx.Provider>
   )

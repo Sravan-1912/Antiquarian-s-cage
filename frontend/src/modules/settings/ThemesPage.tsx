@@ -57,14 +57,15 @@ function WallpaperStudio() {
   const [busy, setBusy] = useState(false)
 
   const take = async (file?: File | null) => {
-    if (!file || !file.type.startsWith('image/')) return
+    if (!file || !(file.type.startsWith('image/') || file.type.startsWith('video/'))) return
     setBusy(true); try { await uploadWallpaper(file) } finally { setBusy(false) }
   }
+  const kindLabel = wallpaper.hasImage ? (wallpaper.mediaKind === 'video' ? 'video' : 'image') : null
   const onDrop = (e: DragEvent) => { e.preventDefault(); setDragging(false); void take(e.dataTransfer.files?.[0]) }
 
   return (
     <Card>
-      <CardHeader title="Wallpaper Studio" description="Upload an image for the Liquid Glass — Wallpaper theme, then tune the frosted-glass surfaces that float over it." />
+      <CardHeader title="Wallpaper Studio" description="Upload an image or a 4K video for the Liquid Glass — Wallpaper theme, then tune the frosted-glass surfaces that float over it." />
       <div className="space-y-4 p-4">
         {!onWallpaperTheme && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-ink-700 bg-ink-850 px-3.5 py-3">
@@ -80,9 +81,9 @@ function WallpaperStudio() {
           className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center transition ${dragging ? 'border-[color:var(--cage-accent)] bg-ink-800' : 'border-ink-600 hover:bg-ink-850'}`}
         >
           <ImageUp className="size-6 text-silver-500" />
-          <div className="text-sm text-silver-300">{busy ? 'Loading…' : wallpaper.hasImage ? 'Replace wallpaper — drop an image or click' : 'Drop an image here or click to upload'}</div>
-          <div className="text-xs text-silver-600">PNG / JPG / WebP · stored locally in your browser</div>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void take(e.target.files?.[0])} />
+          <div className="text-sm text-silver-300">{busy ? 'Loading…' : wallpaper.hasImage ? `Replace wallpaper (${kindLabel}) — drop an image or video, or click` : 'Drop an image or video here, or click to upload'}</div>
+          <div className="text-xs text-silver-600">PNG / JPG / WebP · MP4 / WebM up to 4K · stored locally, muted &amp; looping</div>
+          <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={(e) => void take(e.target.files?.[0])} />
         </div>
 
         <div>
@@ -98,7 +99,7 @@ function WallpaperStudio() {
 
         {wallpaper.hasImage && (
           <div className="flex justify-end">
-            <Button size="sm" variant="ghost" onClick={() => void removeWallpaper()}><Trash2 />Remove image</Button>
+            <Button size="sm" variant="ghost" onClick={() => void removeWallpaper()}><Trash2 />Remove wallpaper</Button>
           </div>
         )}
       </div>

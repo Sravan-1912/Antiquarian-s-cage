@@ -15,12 +15,13 @@
 
 /* Global wallpaper layer — shows the uploaded image behind the whole app (wallpaper theme, or any theme when
    "apply to all" is on). Cards frost over it via the [data-wallpaper-active] rules below. */
-.cage-wallpaper-layer {
-  position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  background-image: var(--cage-wallpaper); background-size: cover; background-position: center; background-repeat: no-repeat;
+.cage-wallpaper-layer { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.cage-wallpaper-media {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   filter: blur(var(--cage-wallpaper-blur)); transform: scale(1.08); will-change: filter;
 }
-.cage-wallpaper-layer::after { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, var(--cage-wallpaper-dim)); }
+.cage-wallpaper-image { background-image: var(--cage-wallpaper); background-size: cover; background-position: center; background-repeat: no-repeat; }
+.cage-wallpaper-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, var(--cage-wallpaper-dim)); }
 html[data-wallpaper-active="1"] body { background: transparent !important; }
 /* When a wallpaper backs the app, turn every theme's cards into frosted glass so the image shows through. */
 html[data-wallpaper-active="1"] [class*="bg-ink-9"], html[data-wallpaper-active="1"] [class*="bg-ink-8"] {
