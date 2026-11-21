@@ -79,6 +79,35 @@ def employee_for(db: Session, user: User) -> Employee | None:
     return db.scalar(select(Employee).where(Employee.user_id == user.id, Employee.organization_id == user.organization_id))
 
 
+_RISK_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+def device_posture_ok(db: Session, app: Application, user: User) -> tuple[bool, str]:
+    """Device-trust gate: True unless the application requires a compliant / within-risk endpoint the user lacks.
+    Posture is evaluated over the user's active managed endpoints; at least one must satisfy the requirement."""
+    needs_compliant = app.require_compliant_device
+    max_risk = app.max_risk_level or "any"
+    if not needs_compliant and max_risk == "any":
+        return True, ""
+    from app.models import Device
+    from app.services import risk
+    emp = employee_for(db, user)
+    if emp is None:
+        return False, "no managed endpoint is linked to your account"
+    devices = list(db.scalars(select(Device).where(Device.employee_id == emp.id, Device.status == "active")).all())
+    if not devices:
+        return False, "access requires a managed endpoint and none is enrolled for you"
+    cap = _RISK_RANK.get(max_risk, 3)
+    for dev in devices:
+        if needs_compliant and dev.compliance_state != "compliant":
+            continue
+        if max_risk != "any" and _RISK_RANK.get(risk.device_risk(db, dev).get("level", "low"), 0) > cap:
+            continue
+        return True, ""  # at least one endpoint meets the required posture
+    reqs = (["compliant"] if needs_compliant else []) + ([f"at or below {max_risk} risk"] if max_risk != "any" else [])
+    return False, f"your endpoint must be {' and '.join(reqs)} to access this application"
+
+
 def assignment_active(db: Session, app: Application, user: User) -> bool:
     emp = employee_for(db, user)
     if emp is None or emp.status != "active":

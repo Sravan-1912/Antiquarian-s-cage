@@ -53,6 +53,10 @@ class Application(UUIDPk, Timestamps, Base):
     redirect_uris: Mapped[dict] = mapped_column(default=dict)  # {"uris": [...]}
     launch_url: Mapped[str | None] = mapped_column(String(512))
     mfa_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Device trust / posture-gated access: deny the OIDC authorization unless the user has a managed endpoint that is
+    # compliant and within the risk bound. max_risk_level: any | low | medium | high (the highest allowed).
+    require_compliant_device: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_risk_level: Mapped[str] = mapped_column(String(8), default="any")
     status: Mapped[str] = mapped_column(String(16), default="active")  # active | disabled
     # Set ONLY when a real authorization-code exchange has completed — never by configuration alone.
     verified_at: Mapped[datetime | None]
