@@ -53,16 +53,8 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
 )
 Input.displayName = 'Input'
 
-export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
-  ({ className, ...props }, ref) => (
-    <select
-      ref={ref}
-      className={cn('cage-input h-9 rounded-md px-2.5 text-sm', className)}
-      {...props}
-    />
-  ),
-)
-Select.displayName = 'Select'
+// Theme-matched dropdown (custom panel; native <option> popups can't carry a theme's glass/accent). Same API.
+export { Select } from './ThemedSelect'
 
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return <label className={cn('mb-1.5 block text-xs font-medium text-silver-400', className)} {...props} />

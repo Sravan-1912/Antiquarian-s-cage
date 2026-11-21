@@ -15,6 +15,10 @@
   --input-bg: var(--color-ink-900); --input-border: var(--color-ink-600); --input-border-focus: var(--cage-accent); --input-text: var(--color-silver-100); --input-shadow: none;
   /* Native <option> popups are OS-painted and ignore translucent/blur backgrounds, so they need a SOLID bg + text. */
   --option-bg: #1b1e27; --option-text: #eef1f8;
+  /* Custom themed dropdown panel (ThemedSelect) — inherits each theme's surface so it matches (glass blurs, etc.). */
+  --menu-bg: var(--color-ink-800); --menu-text: var(--color-silver-100); --menu-border: var(--color-ink-600);
+  --menu-active-bg: var(--color-ink-700); --menu-active-text: var(--color-silver-50);
+  --menu-radius: 0.6rem; --menu-blur: 0px; --menu-shadow: 0 16px 40px -8px rgba(0,0,0,0.55);
 }
 
 .cage-btn {
@@ -53,6 +57,35 @@
 [data-theme="neobrutalism"], [data-theme="material-you"], [data-theme="frutiger-aero"], [data-theme="retro-95"] {
   --option-bg: #ffffff; --option-text: #17181c;
 }
+/* ---- Themed dropdown panel (custom ThemedSelect) ---- */
+.cage-select { cursor: pointer; }
+.cage-select-menu {
+  background: var(--menu-bg); color: var(--menu-text); border: 1px solid var(--menu-border);
+  border-radius: var(--menu-radius); box-shadow: var(--menu-shadow); padding: 4px; min-width: 7rem;
+  backdrop-filter: blur(var(--menu-blur)) saturate(140%); -webkit-backdrop-filter: blur(var(--menu-blur)) saturate(140%);
+  animation: cage-menu-in 120ms ease-out;
+}
+@keyframes cage-menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.cage-select-option { border-radius: calc(var(--menu-radius) - 3px); color: var(--menu-text); transition: background .1s ease, color .1s ease; }
+.cage-select-option.is-active { background: var(--menu-active-bg); color: var(--menu-active-text); }
+.cage-select-option.is-selected { color: var(--cage-accent); font-weight: 600; }
+.cage-select-option.is-disabled { opacity: 0.45; cursor: default; }
+
+/* Glass themes: the dropdown is frosted glass, matching the surfaces. */
+[data-theme="liquid-glass"], [data-theme="custom-wallpaper"] { --menu-bg: rgba(20,24,38,0.72); --menu-blur: 24px; --menu-border: rgba(255,255,255,0.16); --menu-active-bg: rgba(255,255,255,0.12); --menu-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 18px 48px -10px rgba(0,0,0,0.6); }
+[data-theme="crimson-glass"] { --menu-bg: rgba(38,10,18,0.74); --menu-blur: 24px; --menu-border: rgba(255,180,195,0.22); --menu-active-bg: rgba(251,113,133,0.18); --menu-shadow: inset 0 1px 0 rgba(255,180,195,0.2), 0 18px 48px -10px rgba(136,19,55,0.5); }
+[data-theme="cyberpunk-noir"] { --menu-bg: rgba(15,10,30,0.84); --menu-blur: 14px; --menu-border: rgba(0,240,255,0.3); --menu-radius: 2px; --menu-active-bg: rgba(0,240,255,0.14); --menu-shadow: 0 0 22px -4px rgba(255,0,124,0.4); }
+[data-theme="aurora-mesh"] { --menu-bg: rgba(15,23,42,0.7); --menu-blur: 20px; --menu-border: rgba(255,255,255,0.18); --menu-active-bg: rgba(255,255,255,0.12); }
+[data-theme="frutiger-aero"] { --menu-bg: rgba(255,255,255,0.82); --menu-blur: 18px; --menu-text: #0c3346; --menu-border: rgba(255,255,255,0.8); --menu-active-bg: rgba(0,180,216,0.16); --menu-active-text: #05283a; --menu-shadow: inset 0 1px 0 rgba(255,255,255,0.95), 0 14px 36px -10px rgba(0,80,140,0.35); }
+
+/* Distinctive non-glass themes: match their geometry. */
+[data-theme="neobrutalism"] { --menu-bg: #ffffff; --menu-text: #0a0a0a; --menu-border: #000000; --menu-radius: 4px; --menu-shadow: 4px 4px 0 #000; --menu-active-bg: #ffde00; --menu-active-text: #000; }
+[data-theme="retro-95"] { --menu-bg: #c0c0c0; --menu-text: #000; --menu-border: #000; --menu-radius: 0; --menu-shadow: inset 1px 1px 0 #dfdfdf, 2px 2px 0 #404040; --menu-active-bg: #000080; --menu-active-text: #fff; }
+[data-theme="terminal-tui"] { --menu-bg: #000000; --menu-text: #9dffb4; --menu-border: #1f5129; --menu-radius: 0; --menu-active-bg: #00ff66; --menu-active-text: #000; --menu-shadow: 0 0 18px -4px rgba(0,255,102,0.45); }
+[data-theme="neumorphism"] { --menu-bg: #e9edf5; --menu-text: #2b3444; --menu-border: transparent; --menu-radius: 14px; --menu-shadow: 8px 8px 16px #c5ccd9, -8px -8px 16px #ffffff; --menu-active-bg: #dbe1ec; }
+[data-theme="claymorphism"] { --menu-bg: #f3f4ff; --menu-text: #322f55; --menu-border: transparent; --menu-radius: 18px; --menu-shadow: 0 16px 32px rgba(99,102,241,0.18); --menu-active-bg: #e7e8ff; }
+[data-theme="material-you"] { --menu-bg: #ecefe6; --menu-text: #272a22; --menu-border: transparent; --menu-radius: 16px; --menu-shadow: 0 8px 24px rgba(26,28,24,0.14); --menu-active-bg: #dde2d6; }
+
 /* A few dark themes read best with their own tinted option list. */
 [data-theme="tokyo-night"] { --option-bg: #1f2130; --option-text: #c0caf5; }
 [data-theme="catppuccin-mocha"] { --option-bg: #242436; --option-text: #cdd6f4; }
