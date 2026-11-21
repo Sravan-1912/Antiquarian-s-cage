@@ -111,3 +111,16 @@ class SiemDelivery(UUIDPk, Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     next_attempt_at: Mapped[datetime] = mapped_column(default=utcnow)
     sent_at: Mapped[datetime | None]
+
+
+class GeoSecurityPolicy(UUIDPk, Base):
+    """Per-organization location-security config: geo-fencing (allowed countries) and impossible-travel detection.
+    Evaluated whenever an endpoint reports a resolved location. One row per organization."""
+
+    __tablename__ = "geo_security_policies"
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), unique=True)
+    geofence_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    allowed_countries: Mapped[list] = mapped_column(JSON, default=list)   # e.g. ["India", "United States"]
+    on_violation: Mapped[str] = mapped_column(String(12), default="alert")  # alert | isolate
+    impossible_travel: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)

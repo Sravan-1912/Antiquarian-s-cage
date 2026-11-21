@@ -42,6 +42,8 @@ RULES: dict[str, dict] = {
     "authz_denied_burst": {"name": "Repeated permission denials", "kind": "suspicious_activity"},
     "edr_detection": {"name": "Endpoint threat detection", "kind": "suspicious_activity"},  # EDR telemetry rule match
     "remote_access_anomaly": {"name": "Suspicious remote access activity", "kind": "suspicious_activity"},
+    "geofence_violation": {"name": "Endpoint located outside an allowed region", "kind": "suspicious_activity"},
+    "impossible_travel": {"name": "Impossible travel between endpoint locations", "kind": "suspicious_activity"},
     "audit_integrity": {"name": "Audit log integrity check failed", "kind": "suspicious_activity"},
     "phone_approval_refused": {"name": "Sign-in approval refused on phone", "kind": "suspicious_activity"},
     "audit_anchor_failed": {"name": "Audit anchor not written externally", "kind": "operational"},

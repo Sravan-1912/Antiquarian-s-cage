@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import math
 
 import httpx
 from sqlalchemy import select
@@ -99,6 +100,7 @@ def resolve_and_store(db: Session, device: Device, aps: list[dict], ip: str | No
         return None  # nothing usable; leave any previous location in place
 
     row = db.scalar(select(DeviceLocation).where(DeviceLocation.device_id == device.id))
+    prev = (row.latitude, row.longitude, row.resolved_at) if row and row.latitude is not None else None
     if row is None:
         row = DeviceLocation(device_id=device.id)
         db.add(row)
@@ -109,4 +111,60 @@ def resolve_and_store(db: Session, device: Device, aps: list[dict], ip: str | No
     row.ap_count = len(aps)
     row.resolved_at = utcnow()
     db.commit()
+    try:
+        _geo_security(db, device, prev, lat, lon, country)
+    except Exception as exc:  # noqa: BLE001 — never fail location ingest on a detection error
+        log.debug("geo-security checks skipped: %s", exc)
     return row
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _geo_security(db: Session, device: Device, prev, lat, lon, country) -> None:
+    """Evaluate geo-fencing + impossible-travel against the org's GeoSecurityPolicy (best-effort)."""
+    from app.models import GeoSecurityPolicy
+    from app.services import alerts
+
+    policy = db.scalar(select(GeoSecurityPolicy).where(GeoSecurityPolicy.organization_id == device.organization_id))
+    if policy is None:
+        return
+    org_id = device.organization_id
+
+    # Impossible travel: distance / elapsed time implies a speed no aircraft could manage.
+    if policy.impossible_travel and prev and lat is not None and lon is not None:
+        plat, plon, pt = prev
+        hours = max((utcnow() - pt).total_seconds() / 3600.0, 1e-6)
+        km = _haversine_km(plat, plon, lat, lon)
+        kmh = km / hours
+        if km > 500 and kmh > 900:
+            alerts.raise_alert(
+                db, org_id, "impossible_travel", severity="high",
+                title=f"Impossible travel for {device.hostname}",
+                description=f"{device.hostname} moved {km:.0f} km in {hours:.1f} h (~{kmh:.0f} km/h) between location reports.",
+                dedup_key=f"impossible_travel:{device.id}",
+                device_id=device.id, evidence={"km": round(km), "hours": round(hours, 2), "kmh": round(kmh),
+                                               "from": [round(plat, 3), round(plon, 3)], "to": [round(lat, 3), round(lon, 3)]})
+
+    # Geo-fence: the endpoint resolved outside the allowed countries.
+    if policy.geofence_enabled and policy.allowed_countries and country and country not in policy.allowed_countries:
+        alerts.raise_alert(
+            db, org_id, "geofence_violation", severity="high",
+            title=f"{device.hostname} is outside allowed regions",
+            description=f"{device.hostname} resolved to {country}, which is not in the allowed list "
+                        f"({', '.join(policy.allowed_countries)}).",
+            dedup_key=f"geofence:{device.id}:{country}",
+            device_id=device.id, evidence={"country": country, "allowed": policy.allowed_countries})
+        if policy.on_violation == "isolate":
+            try:
+                from app.services import audit, remote
+                remote.create_action(db, device, "device.isolate", {},
+                                     reason=f"Automatic geo-fence isolation ({country} not allowed)",
+                                     actor=audit.Actor(type="system", user_id=None, label="geo-fence"))
+            except Exception as exc:  # noqa: BLE001 — isolation is best-effort; the alert already fired
+                log.warning("geo-fence auto-isolate failed for %s: %s", device.id, exc)

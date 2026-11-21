@@ -273,6 +273,41 @@ def web_activity_top(ctx: AuthContext = Depends(READ), db: Session = Depends(get
     return webactivity.fleet_top(db, device_ids, limit=10)
 
 
+def _geo_policy_out(p) -> s.GeoPolicyOut:
+    if p is None:
+        return s.GeoPolicyOut(geofence_enabled=False, allowed_countries=[], on_violation="alert", impossible_travel=False)
+    return s.GeoPolicyOut(geofence_enabled=p.geofence_enabled, allowed_countries=p.allowed_countries,
+                          on_violation=p.on_violation, impossible_travel=p.impossible_travel)
+
+
+@router.get("/geo/policy", response_model=s.GeoPolicyOut)
+def get_geo_policy(ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """The org's location-security policy: geo-fencing (allowed countries) + impossible-travel detection."""
+    from app.models import GeoSecurityPolicy
+    return _geo_policy_out(db.scalar(select(GeoSecurityPolicy).where(GeoSecurityPolicy.organization_id == ctx.user.organization_id)))
+
+
+@router.put("/geo/policy", response_model=s.GeoPolicyOut)
+def set_geo_policy(body: s.GeoPolicyUpdate, ctx: AuthContext = Depends(require_permission("devices:manage")),
+                   db: Session = Depends(get_db)):
+    from app.models import GeoSecurityPolicy
+    p = db.scalar(select(GeoSecurityPolicy).where(GeoSecurityPolicy.organization_id == ctx.user.organization_id))
+    if p is None:
+        p = GeoSecurityPolicy(organization_id=ctx.user.organization_id)
+        db.add(p)
+    p.geofence_enabled = body.geofence_enabled
+    p.allowed_countries = [c.strip() for c in body.allowed_countries if c.strip()]
+    p.on_violation = body.on_violation
+    p.impossible_travel = body.impossible_travel
+    p.updated_at = utcnow()
+    db.commit()
+    audit.record(db, ctx.user.organization_id, ctx.actor, "geo.policy_updated",
+                 metadata={"geofence_enabled": p.geofence_enabled, "allowed_countries": p.allowed_countries,
+                           "on_violation": p.on_violation, "impossible_travel": p.impossible_travel})
+    db.commit()
+    return _geo_policy_out(p)
+
+
 @router.patch("/devices/{device_id}", response_model=s.DeviceOut)
 def update_device(device_id: uuid.UUID, body: s.DeviceUpdate,
                   ctx: AuthContext = Depends(require_permission("devices:manage")), db: Session = Depends(get_db)):

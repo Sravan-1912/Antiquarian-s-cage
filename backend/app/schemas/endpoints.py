@@ -311,3 +311,17 @@ class TopSiteOut(BaseModel):
     domain: str
     visits: int
     endpoints: int
+
+
+class GeoPolicyOut(BaseModel):
+    geofence_enabled: bool
+    allowed_countries: list[str]
+    on_violation: str
+    impossible_travel: bool
+
+
+class GeoPolicyUpdate(BaseModel):
+    geofence_enabled: bool = False
+    allowed_countries: list[Annotated[str, StringConstraints(max_length=64)]] = Field(default_factory=list, max_length=50)
+    on_violation: Literal["alert", "isolate"] = "alert"
+    impossible_travel: bool = False
