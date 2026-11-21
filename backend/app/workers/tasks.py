@@ -44,6 +44,12 @@ def run_cycle(db: Session, *, purge: bool = False) -> dict:
         db.rollback()
         log.exception("SIEM egress failed")
     try:
+        from app.services import chat
+        out["chat"] = chat.deliver_outbox(db)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        log.exception("chat egress failed")
+    try:
         from app.services import audit_anchor
         out["audit_anchors"] = audit_anchor.cycle(db)
         db.commit()

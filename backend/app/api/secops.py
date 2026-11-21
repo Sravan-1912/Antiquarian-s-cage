@@ -309,3 +309,66 @@ def test_siem(ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(g
     """Send a one-off test event to the configured destination and report the result."""
     from app.services import siem
     return siem.send_test(db, ctx.user.organization_id)
+
+
+# ---- Chat alert channels (Slack / Teams / Discord / generic webhook) ----
+class ChatWebhookIn(BaseModel):
+    platform: Literal["slack", "teams", "discord", "generic"]
+    url: str | None = Field(default=None, max_length=1024)  # write-only; omit to keep the existing URL
+    enabled: bool = True
+    min_severity: Literal["low", "medium", "high", "critical"] = "high"
+
+
+def _chat_out(w) -> dict:
+    return {"platform": w.platform, "enabled": w.enabled, "min_severity": w.min_severity,
+            "configured": w.url_enc is not None, "last_success_at": w.last_success_at, "last_error": w.last_error}
+
+
+@router.get("/chat-webhooks")
+def list_chat_webhooks(ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    from app.services import chat
+    return [_chat_out(w) for w in chat.webhooks(db, ctx.user.organization_id)]
+
+
+@router.put("/chat-webhooks")
+def put_chat_webhook(body: ChatWebhookIn, ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    """Configure a chat alert channel. The webhook URL is write-only and stored encrypted."""
+    from app.models import ChatWebhook
+    from app.services import chat
+    org = ctx.user.organization_id
+    w = db.scalar(select(ChatWebhook).where(ChatWebhook.organization_id == org, ChatWebhook.platform == body.platform))
+    if w is None:
+        if not body.url:
+            raise HTTPException(422, "url is required for a new channel")
+        w = ChatWebhook(id=uuid.uuid4(), organization_id=org, platform=body.platform, url_enc=chat.encrypt_url(body.url.strip()))
+        db.add(w)
+    elif body.url is not None:
+        if not body.url.strip():
+            raise HTTPException(422, "url cannot be empty")
+        w.url_enc = chat.encrypt_url(body.url.strip())
+    w.enabled, w.min_severity = body.enabled, body.min_severity
+    audit.record(db, org, ctx.actor, "chat_webhook.configured", target_type="organization", target_id=org,
+                 metadata={"platform": body.platform, "enabled": body.enabled, "min_severity": body.min_severity})
+    db.commit()
+    return _chat_out(w)
+
+
+@router.delete("/chat-webhooks/{platform}", status_code=204)
+def delete_chat_webhook(platform: str, ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    from app.models import ChatWebhook
+    w = db.scalar(select(ChatWebhook).where(ChatWebhook.organization_id == ctx.user.organization_id, ChatWebhook.platform == platform))
+    if w:
+        db.delete(w)
+        audit.record(db, ctx.user.organization_id, ctx.actor, "chat_webhook.removed", target_type="organization",
+                     target_id=ctx.user.organization_id, metadata={"platform": platform})
+        db.commit()
+
+
+@router.post("/chat-webhooks/{platform}/test")
+def test_chat_webhook(platform: str, ctx: AuthContext = Depends(SIEM_SETTINGS), db: Session = Depends(get_db)):
+    from app.models import ChatWebhook
+    from app.services import chat
+    w = db.scalar(select(ChatWebhook).where(ChatWebhook.organization_id == ctx.user.organization_id, ChatWebhook.platform == platform))
+    if w is None:
+        raise HTTPException(404, "channel not configured")
+    return chat.send_test(db, w)
