@@ -34,10 +34,22 @@ Pop-Location
 if (-not (Test-Path (Join-Path $backend "dist\cage-backend\cage-backend.exe"))) { throw "backend exe not produced" }
 
 # 3. Electron installer -------------------------------------------------------------------------
+# electron-builder's own exe-icon/version editing (signAndEditExecutable) pulls winCodeSign, whose
+# archive contains macOS symlinks that 7-Zip cannot extract on Windows without Developer Mode or
+# elevation. So signAndEditExecutable is false in package.json and we do it ourselves: package to an
+# unpacked dir, stamp the brand icon onto the app exe with the vendored rcedit, then build the NSIS
+# installer from that already-packaged dir (--prepackaged skips the pack+edit step, so no winCodeSign).
 Step "Packaging the desktop app (electron-builder)"
 Push-Location $desktop
 if (-not (Test-Path "node_modules")) { npm install }
-npm run dist
+& ".\node_modules\.bin\electron-builder" --win --dir
+$appExe = Join-Path $desktop "release\win-unpacked\Antiquarian's Cage.exe"
+if (-not (Test-Path $appExe)) { throw "packaging produced no app exe" }
+Step "Stamping the app icon (rcedit)"
+& (Join-Path $desktop "tools\rcedit-x64.exe") $appExe --set-icon (Join-Path $desktop "build\icon.ico")
+if ($LASTEXITCODE -ne 0) { throw "rcedit failed to set the app icon" }
+Step "Building the installer (NSIS, from the packaged dir)"
+& ".\node_modules\.bin\electron-builder" --win nsis --prepackaged "release\win-unpacked"
 Pop-Location
 
 Step "Done"
