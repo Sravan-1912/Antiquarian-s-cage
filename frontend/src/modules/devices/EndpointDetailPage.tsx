@@ -6,12 +6,13 @@ import { Alert, Badge, Button, Card, CardHeader, EmptyState, Field, Input, Selec
 import { Dialog } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
-import type { AdminUser, Device, DeviceCertificate, DeviceEvent, Employee, Heartbeat, Inventory, NetworkUsage, Page, RiskScore } from '@/types/api'
+import type { AdminUser, Device, DeviceCertificate, Employee, Heartbeat, Inventory, NetworkUsage, Page, RiskScore } from '@/types/api'
 import { formatDateTime, relativeTime } from '@/utils/format'
 import { ConnectivityBadge, DeviceStatusBadge, SECURITY_LABELS, SecurityStateBadge, formatBytes } from './shared'
 import { DeviceComplianceCard, DevicePoliciesCard } from '@/modules/compliance/DeviceComplianceCard'
 import { RemotePanel } from '@/modules/remote/RemotePanel'
 import { EndpointLocationCard, EndpointPatchCard, EndpointTopSitesCard } from './EndpointGeoCards'
+import { EndpointTimelineCard } from './EndpointTimeline'
 
 type Op = 'suspend' | 'reactivate' | 'revoke' | 'unenroll'
 const OPS: Record<Op, { title: string; description: string; button: string; danger: boolean }> = {
@@ -40,7 +41,6 @@ export function EndpointDetailPage() {
 
   const device = useQuery({ queryKey: ['device', id], queryFn: () => api.get<Device>(`/devices/${id}`), refetchInterval: 30_000 })
   const inv = useQuery({ queryKey: ['device', id, 'inventory'], queryFn: () => api.get<Inventory | null>(`/devices/${id}/inventory`) })
-  const events = useQuery({ queryKey: ['device', id, 'events'], queryFn: () => api.get<DeviceEvent[]>(`/devices/${id}/events`) })
   const certs = useQuery({ queryKey: ['device', id, 'certs'], queryFn: () => api.get<DeviceCertificate[]>(`/devices/${id}/certificates`) })
   const net = useQuery({ queryKey: ['device', id, 'network'], queryFn: () => api.get<NetworkUsage>(`/devices/${id}/network`), refetchInterval: 60_000 })
   const beats = useQuery({ queryKey: ['device', id, 'heartbeats'], queryFn: () => api.get<Heartbeat[]>(`/devices/${id}/heartbeats`), refetchInterval: 30_000 })
@@ -186,17 +186,7 @@ export function EndpointDetailPage() {
             </Table>
           )}
         </Card>
-        <Card>
-          <CardHeader title="Device history" />
-          <ol className="max-h-72 overflow-y-auto px-4 py-2">{events.data?.map((e) => (
-            <li key={e.id} className="relative border-l border-ink-700 py-2 pl-4">
-              <span className="absolute -left-[3.5px] top-3.5 size-1.5 rounded-full bg-emerald-500/70" />
-              <div className="text-[13px] text-silver-100">{e.kind.replace(/_/g, ' ')}</div>
-              <div className="text-[11px] text-silver-500">{formatDateTime(e.created_at)}</div>
-              {'reason' in e.details && <div className="text-xs text-silver-400">Reason: {String(e.details.reason)}</div>}
-            </li>
-          ))}</ol>
-        </Card>
+        <EndpointTimelineCard deviceId={d.id} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">

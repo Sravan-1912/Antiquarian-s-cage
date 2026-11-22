@@ -21,7 +21,7 @@ from app.models import (
 )
 from app.schemas import endpoints as s
 from app.schemas.common import Page
-from app.services import audit, devices, patches, subscriptions, tenancy, webactivity
+from app.services import audit, devices, patches, subscriptions, tenancy, timeline, webactivity
 from app.services.devices import DeviceError
 
 router = APIRouter(tags=["endpoints"])
@@ -240,6 +240,14 @@ def device_location(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: 
     """Latest resolved position for one endpoint (source + accuracy radius included; approximate, never exact)."""
     _get(db, ctx, device_id)
     return db.scalar(select(DeviceLocation).where(DeviceLocation.device_id == device_id))
+
+
+@router.get("/devices/{device_id}/timeline", response_model=list[s.TimelineEntryOut])
+def device_timeline(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """Unified, read-only activity feed for one endpoint: lifecycle events, alerts, remote actions, sessions and
+    script runs merged into one reverse-chronological timeline."""
+    _get(db, ctx, device_id)  # scope check
+    return timeline.device_timeline(db, device_id)
 
 
 @router.get("/devices/{device_id}/top-sites", response_model=list[s.DeviceTopSiteOut])

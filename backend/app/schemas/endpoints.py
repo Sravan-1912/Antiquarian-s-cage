@@ -322,6 +322,16 @@ class TopSiteOut(BaseModel):
     endpoints: int
 
 
+class TimelineEntryOut(BaseModel):
+    """One entry in a device's unified activity timeline (lifecycle, alert, action, remote, script, removable)."""
+    at: datetime
+    category: str
+    severity: str | None
+    title: str
+    detail: str
+    ref_id: str | None
+
+
 class DevicePatchStatusOut(BaseModel):
     pending_total: int | None
     pending_critical: int | None

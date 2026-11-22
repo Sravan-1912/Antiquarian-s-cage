@@ -70,3 +70,24 @@ def test_deploy_requires_targets_and_reason(client, outbox):
     sid = _create(client).json()["id"]
     assert client.post(f"/api/v1/scripts/{sid}/deploy", json={"device_ids": [], "reason": "x"},
                        headers=csrf(client)).status_code == 422
+
+
+def test_timeline_merges_sources(client, outbox):
+    agent = _setup(client, outbox)  # enrolling the device records a lifecycle event
+    sid = _create(client).json()["id"]
+    # a remote action + a script deployment add more timeline entries
+    client.post(f"/api/v1/devices/{agent.device_id}/actions",
+                json={"command": "device.inspect", "parameters": {}, "reason": "look"}, headers=csrf(client))
+    client.post(f"/api/v1/scripts/{sid}/deploy",
+                json={"device_ids": [agent.device_id], "reason": "ticket 1"}, headers=csrf(client))
+
+    tl = client.get(f"/api/v1/devices/{agent.device_id}/timeline")
+    assert tl.status_code == 200, tl.text
+    entries = tl.json()
+    cats = {e["category"] for e in entries}
+    assert "lifecycle" in cats      # enrolment
+    assert "action" in cats         # device.inspect
+    assert "script" in cats         # script deployment
+    # newest-first ordering
+    ats = [e["at"] for e in entries]
+    assert ats == sorted(ats, reverse=True)
