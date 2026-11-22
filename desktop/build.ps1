@@ -7,7 +7,10 @@
 # Run from the desktop/ folder:  .\build.ps1
 # Requires: Node + npm, the backend venv at backend/.venv, PyInstaller in that venv.
 
-$ErrorActionPreference = "Stop"
+# NOTE: 'Continue', not 'Stop' — native tools here (Vite, PyInstaller) print warnings to stderr, which under
+# 'Stop' PowerShell 5.1 turns into a fatal NativeCommandError. Each stage below validates its real output
+# (Test-Path / $LASTEXITCODE) and throws on genuine failure, so warnings no longer abort the build.
+$ErrorActionPreference = "Continue"
 $desktop = $PSScriptRoot
 $root    = Split-Path $desktop -Parent
 $frontend = Join-Path $root "frontend"
