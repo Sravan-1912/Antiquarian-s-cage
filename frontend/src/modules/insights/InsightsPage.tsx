@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Globe2, MapPin, ShieldAlert } from 'lucide-react'
+import { Globe2, MapPin, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { Alert, Badge, Button, Card, CardHeader, EmptyState, Field, Input, PageHeader, Select, Spinner, Table, Td, Th } from '@/components/ui/primitives'
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError } from '@/services/api'
@@ -13,6 +13,46 @@ interface FleetLocation {
   device_id: string; display_name: string; hostname: string; source: 'wifi' | 'ip' | 'none'
   latitude: number | null; longitude: number | null; accuracy_m: number | null
   city: string | null; country: string | null; resolved_at: string
+}
+
+interface PatchSummary {
+  devices: number; reporting: number; up_to_date: number; with_critical: number
+  reboot_pending: number; pending_total: number; pending_critical: number; pending_important: number
+}
+
+function PatchScorecard() {
+  const q = useQuery({ queryKey: ['patch', 'summary'], queryFn: () => api.get<PatchSummary>('/patch/summary'), refetchInterval: 300_000 })
+  const d = q.data
+  const stats = [
+    { label: 'Up to date', value: d?.up_to_date ?? 0, tone: 'text-emerald-300' },
+    { label: 'With critical', value: d?.with_critical ?? 0, tone: 'text-red-300' },
+    { label: 'Reboot pending', value: d?.reboot_pending ?? 0, tone: 'text-amber-300' },
+    { label: 'Not reporting', value: Math.max(0, (d?.devices ?? 0) - (d?.reporting ?? 0)), tone: 'text-silver-300' },
+  ]
+  return (
+    <Card>
+      <CardHeader title="Patch scorecard" description="OS update posture across all visible endpoints. Reported on the agent's inventory cycle — endpoints that haven't reported are counted as not reporting." />
+      {q.isLoading ? <div className="grid h-40 place-items-center"><Spinner /></div>
+        : (d?.devices ?? 0) === 0 ? <EmptyState icon={ShieldCheck} title="No endpoints yet" description="Enrol endpoints to see their patch posture here." />
+          : (
+            <div className="space-y-4 p-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {stats.map((s) => (
+                  <div key={s.label} className="rounded-lg border border-ink-700 bg-ink-800/40 p-3">
+                    <div className={`text-2xl font-semibold tabular-nums ${s.tone}`}>{s.value}</div>
+                    <div className="mt-0.5 text-xs text-silver-500">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              <dl className="grid grid-cols-[1fr_auto] gap-y-1.5 text-sm">
+                <dt className="text-silver-500">Reporting endpoints</dt><dd className="tabular-nums text-silver-200">{d!.reporting} / {d!.devices}</dd>
+                <dt className="text-silver-500">Pending updates (total)</dt><dd className="tabular-nums text-silver-200">{d!.pending_total.toLocaleString()}</dd>
+                <dt className="text-silver-500">Critical / important</dt><dd className="tabular-nums text-silver-200">{d!.pending_critical.toLocaleString()} / {d!.pending_important.toLocaleString()}</dd>
+              </dl>
+            </div>
+          )}
+    </Card>
+  )
 }
 
 function TopWebsites() {
@@ -160,6 +200,7 @@ export function InsightsPage() {
     <div className="animate-fade-in space-y-4">
       <PageHeader title="Web & locations" description="Fleet-wide browsing and geolocation insights. Locations are approximate and labelled with their source and accuracy — never presented as exact." />
       <GeoSecurityCard />
+      <PatchScorecard />
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         <TopWebsites />
         <FleetLocations />

@@ -103,6 +103,9 @@ class AgentClient:
     def web_activity(self, key, payload: dict) -> dict:
         return self._send("/agent/v1/web-activity", payload, key)
 
+    def patch_status(self, key, payload: dict) -> dict:
+        return self._send("/agent/v1/patch-status", payload, key)
+
     def renew(self, key, payload: dict) -> dict:
         return self._send("/agent/v1/certificate/renew", payload, key)
 

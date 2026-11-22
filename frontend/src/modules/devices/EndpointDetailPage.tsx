@@ -11,7 +11,7 @@ import { formatDateTime, relativeTime } from '@/utils/format'
 import { ConnectivityBadge, DeviceStatusBadge, SECURITY_LABELS, SecurityStateBadge, formatBytes } from './shared'
 import { DeviceComplianceCard, DevicePoliciesCard } from '@/modules/compliance/DeviceComplianceCard'
 import { RemotePanel } from '@/modules/remote/RemotePanel'
-import { EndpointLocationCard, EndpointTopSitesCard } from './EndpointGeoCards'
+import { EndpointLocationCard, EndpointPatchCard, EndpointTopSitesCard } from './EndpointGeoCards'
 
 type Op = 'suspend' | 'reactivate' | 'revoke' | 'unenroll'
 const OPS: Record<Op, { title: string; description: string; button: string; danger: boolean }> = {
@@ -167,6 +167,7 @@ export function EndpointDetailPage() {
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         <EndpointLocationCard deviceId={d.id} />
         <EndpointTopSitesCard deviceId={d.id} />
+        <EndpointPatchCard deviceId={d.id} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">

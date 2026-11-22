@@ -21,7 +21,7 @@ from app.models import (
 )
 from app.schemas import endpoints as s
 from app.schemas.common import Page
-from app.services import audit, devices, subscriptions, tenancy, webactivity
+from app.services import audit, devices, patches, subscriptions, tenancy, webactivity
 from app.services.devices import DeviceError
 
 router = APIRouter(tags=["endpoints"])
@@ -271,6 +271,20 @@ def web_activity_top(ctx: AuthContext = Depends(READ), db: Session = Depends(get
     """Fleet-wide top 10 websites across all visible endpoints (aggregated domain visit counts)."""
     device_ids = list(db.scalars(_scope(select(Device.id), ctx)).all())
     return webactivity.fleet_top(db, device_ids, limit=10)
+
+
+@router.get("/devices/{device_id}/patch-status", response_model=s.DevicePatchStatusOut | None)
+def device_patch_status(device_id: uuid.UUID, ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """Latest OS patch status for one endpoint (pending updates by severity, reboot-pending, last-patched)."""
+    _get(db, ctx, device_id)
+    return patches.device_status(db, device_id)
+
+
+@router.get("/patch/summary", response_model=s.PatchFleetSummaryOut)
+def patch_summary(ctx: AuthContext = Depends(READ), db: Session = Depends(get_db)):
+    """Fleet patch scorecard across all visible endpoints (reporting / up-to-date / critical / reboot-pending)."""
+    device_ids = list(db.scalars(_scope(select(Device.id), ctx)).all())
+    return patches.fleet_summary(db, device_ids)
 
 
 def _geo_policy_out(p) -> s.GeoPolicyOut:

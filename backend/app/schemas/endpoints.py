@@ -147,6 +147,15 @@ class WebActivityRequest(_Strict):
     sites: list[SiteVisitIn] = Field(default_factory=list, max_length=100)
 
 
+class PatchStatusRequest(_Strict):
+    """Agent-reported OS patch status for the fleet scorecard (counts may be null when the OS can't report them)."""
+    pending_total: int | None = Field(default=None, ge=0, le=100_000)
+    pending_critical: int | None = Field(default=None, ge=0, le=100_000)
+    pending_important: int | None = Field(default=None, ge=0, le=100_000)
+    reboot_pending: bool = False
+    last_patched: str | None = Field(default=None, max_length=64)
+
+
 class InventoryRequest(_Strict):
     agent_version: Tiny
     collected_at: datetime | None = None
@@ -311,6 +320,27 @@ class TopSiteOut(BaseModel):
     domain: str
     visits: int
     endpoints: int
+
+
+class DevicePatchStatusOut(BaseModel):
+    pending_total: int | None
+    pending_critical: int | None
+    pending_important: int | None
+    reboot_pending: bool
+    last_patched: str | None
+    checked_at: str | None
+
+
+class PatchFleetSummaryOut(BaseModel):
+    """Fleet patch scorecard across all visible endpoints."""
+    devices: int          # total visible endpoints
+    reporting: int        # how many have reported patch status
+    up_to_date: int       # reporting, no pending updates, no reboot pending
+    with_critical: int    # reporting with ≥1 critical update pending
+    reboot_pending: int
+    pending_total: int
+    pending_critical: int
+    pending_important: int
 
 
 class GeoPolicyOut(BaseModel):

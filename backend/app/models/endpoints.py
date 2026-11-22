@@ -141,6 +141,20 @@ class DeviceLocation(UUIDPk, Base):
     resolved_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class DevicePatchStatus(UUIDPk, Base):
+    """Latest OS patch status for a device (one row per device): pending updates by severity, reboot-pending flag and
+    when it was last patched. Reported by the agent on the inventory cadence."""
+
+    __tablename__ = "device_patch_status"
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True, index=True)
+    pending_total: Mapped[int | None] = mapped_column(Integer)
+    pending_critical: Mapped[int | None] = mapped_column(Integer)
+    pending_important: Mapped[int | None] = mapped_column(Integer)
+    reboot_pending: Mapped[bool] = mapped_column(default=False)
+    last_patched: Mapped[str | None] = mapped_column(String(64))  # agent-reported date string (informational)
+    checked_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class DeviceSiteVisit(UUIDPk, Base):
     """Aggregated per-domain visit counts reported by the agent (no full URLs). One row per (device, domain)."""
 

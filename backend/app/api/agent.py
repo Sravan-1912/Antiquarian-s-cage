@@ -147,6 +147,15 @@ def web_activity(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(
     return {"accepted": True}
 
 
+@router.post("/patch-status", status_code=202)
+def patch_status(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Store the endpoint's OS patch status (pending updates, reboot-pending, last-patched) for the fleet scorecard."""
+    from app.services import patches
+    req = _parse(s.PatchStatusRequest, ctx.body)
+    patches.record(db, ctx.device.id, req.model_dump())
+    return {"accepted": True}
+
+
 @router.post("/certificate/renew", response_model=s.RenewResponse)
 def renew(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
     req = _parse(s.RenewRequest, ctx.body)

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Globe2, MapPin } from 'lucide-react'
+import { Globe2, MapPin, ShieldCheck } from 'lucide-react'
 import { Badge, Card, CardHeader, EmptyState } from '@/components/ui/primitives'
 import { api } from '@/services/api'
 import { relativeTime } from '@/utils/format'
@@ -58,6 +58,47 @@ export function EndpointLocationCard({ deviceId }: { deviceId: string }) {
             <dt className="text-silver-500">Place</dt><dd className="text-silver-100">{place || '—'}</dd>
             <dt className="text-silver-500">Coordinates</dt><dd className="font-mono text-xs text-silver-200">{loc!.latitude!.toFixed(5)}, {loc!.longitude!.toFixed(5)}</dd>
             <dt className="text-silver-500">Public IP</dt><dd className="font-mono text-xs text-silver-200">{loc!.ip ?? '—'}</dd>
+          </dl>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+export interface DevicePatchStatus {
+  pending_total: number | null
+  pending_critical: number | null
+  pending_important: number | null
+  reboot_pending: boolean
+  last_patched: string | null
+  checked_at: string | null
+}
+
+export function EndpointPatchCard({ deviceId }: { deviceId: string }) {
+  const q = useQuery({ queryKey: ['device', deviceId, 'patch-status'], queryFn: () => api.get<DevicePatchStatus | null>(`/devices/${deviceId}/patch-status`), refetchInterval: 300_000 })
+  const p = q.data
+  const total = p?.pending_total
+  const crit = p?.pending_critical ?? 0
+  const upToDate = p != null && (total ?? 0) === 0 && !p.reboot_pending
+  const tone = crit > 0 ? 'danger' : (total ?? 0) > 0 || p?.reboot_pending ? 'warning' : 'success'
+  return (
+    <Card>
+      <CardHeader title="OS patch status" description="Pending operating-system updates reported by the agent on its inventory cycle." />
+      {!p ? (
+        <EmptyState icon={ShieldCheck} title="No patch data yet" description="Reported on the agent's inventory cycle (Windows Update / apt / dnf). Counts may be blank when the OS can't supply them." />
+      ) : (
+        <div className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge tone={tone}>{upToDate ? 'Up to date' : total == null ? 'Status unknown' : `${total} update${total === 1 ? '' : 's'} pending`}</Badge>
+            {crit > 0 && <Badge tone="danger">{crit} critical</Badge>}
+            {p.reboot_pending && <Badge tone="warning">Reboot pending</Badge>}
+            <span className="ml-auto text-silver-600">checked {p.checked_at ? relativeTime(p.checked_at) : '—'}</span>
+          </div>
+          <dl className="grid grid-cols-[130px_1fr] gap-y-1.5 text-sm">
+            <dt className="text-silver-500">Pending total</dt><dd className="tabular-nums text-silver-100">{total ?? '—'}</dd>
+            <dt className="text-silver-500">Critical</dt><dd className="tabular-nums text-silver-100">{p.pending_critical ?? '—'}</dd>
+            <dt className="text-silver-500">Important</dt><dd className="tabular-nums text-silver-100">{p.pending_important ?? '—'}</dd>
+            <dt className="text-silver-500">Last patched</dt><dd className="text-silver-200">{p.last_patched ?? '—'}</dd>
           </dl>
         </div>
       )}

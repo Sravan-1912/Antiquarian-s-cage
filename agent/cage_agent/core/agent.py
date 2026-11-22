@@ -178,6 +178,14 @@ class Agent:
         except Exception as exc:  # noqa: BLE001
             log.debug("web-activity report skipped: %s", exc)
 
+    def patch_status_once(self) -> None:
+        """Report OS patch status (pending updates, reboot-pending, last-patched) for the fleet scorecard (best-effort)."""
+        try:
+            from cage_agent.collectors.patches import collect as collect_patches
+            self.client.patch_status(self.key, collect_patches())
+        except Exception as exc:  # noqa: BLE001
+            log.debug("patch-status report skipped: %s", exc)
+
     def renew_certificate(self) -> None:
         new_key = identity.generate_key()
         resp = self.client.renew(self.key, {"csr_pem": identity.make_csr(new_key, socket.gethostname())})
@@ -209,6 +217,7 @@ class Agent:
                         self.inventory_once()
                         self.location_once()      # Wi-Fi/IP geolocation, on the inventory cadence
                         self.web_activity_once()  # aggregated top-domains, on the inventory cadence
+                        self.patch_status_once()  # OS patch status, on the inventory cadence
                         self.next_inventory = time.monotonic() + self.cfg.inventory_interval_seconds
                     elif self.server_status == "suspended":
                         log.info("device is suspended by an administrator; only heartbeats are sent")

@@ -19,6 +19,7 @@ from app.models.endpoints import (
     DeviceHeartbeat,
     DeviceInventory,
     DeviceLocation,
+    DevicePatchStatus,
     DeviceSiteVisit,
     EnrollmentToken,
 )
@@ -50,7 +51,7 @@ __all__ = [
     "Base", "Organization", "Permission", "Role", "RolePermission", "User", "UserRole", "UserSession",
     "AuthToken", "AuthenticationEvent", "Employee", "EmployeeEvent", "AuditLog", "AuditAnchor", "Notification",
     "Device", "EnrollmentToken", "DeviceCertificate", "AgentRequestNonce", "DeviceHeartbeat", "DeviceInventory",
-    "DeviceEvent", "DeviceLocation", "DeviceSiteVisit", "AgentVersion", "EndpointPolicy", "PolicyRevision", "PolicyAssignment", "CommandJob",
+    "DeviceEvent", "DeviceLocation", "DevicePatchStatus", "DeviceSiteVisit", "AgentVersion", "EndpointPolicy", "PolicyRevision", "PolicyAssignment", "CommandJob",
     "PolicyDeployment", "ComplianceCheckSetting", "ComplianceEvaluation", "ComplianceResult",
     "RemoteSession", "Application", "ApplicationAssignment", "OIDCAuthorizationCode", "WebAuthnChallenge",
     "WebAuthnCredential", "SecurityAlert", "AlertEvent", "NotificationPreference", "EmailOutbox", "SiemDestination", "SiemDelivery", "GeoSecurityPolicy", "ChatWebhook", "ChatDelivery", "ResponsePlaybook", "PhoneAuthenticator", "PhoneLoginRequest", "PhonePairing", "WindowsUnlockKey", "Subscription", "SubscriptionPlan",
