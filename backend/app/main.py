@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api import agent, auth, billing, devices, employees, identity, oidc, operations, organizations, phone, remote, scripts, secops, security_mgmt, users
+from app.api import agent, auth, billing, devices, employees, groups, identity, oidc, operations, organizations, phone, remote, scripts, secops, security_mgmt, users
 from app.core.config import get_settings
 from app.core.database import session_factory
 from app.core.logging import configure_logging
@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
     api.include_router(operations.router)
     api.include_router(remote.router)  # before devices: its /devices/{id}/actions|assist must win over /{op}
     api.include_router(scripts.router)  # before devices: /devices/{id}/script-runs must win over /{op}
+    api.include_router(groups.router)
     api.include_router(devices.router)
     api.include_router(security_mgmt.router)
     api.include_router(identity.router)
