@@ -336,6 +336,9 @@ HANDLERS = {
     "assist.end": close_quick_assist, "rdp.start": rdp_enable, "rdp.end": rdp_disable,
 }
 
+from cage_agent.remote.script_runner import run_script  # noqa: E402 — shared across platforms
+HANDLERS["script.run"] = run_script
+
 # On Linux the POSIX implementations replace the whole handler set (see remote/linux_actions.py).
 if sys.platform.startswith("linux"):
     from cage_agent.remote import linux_actions

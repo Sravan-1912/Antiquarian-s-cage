@@ -25,6 +25,7 @@ import { PoliciesPage } from '@/modules/policies/PoliciesPage'
 import { PolicyDetailPage } from '@/modules/policies/PolicyDetailPage'
 import { CompliancePage } from '@/modules/compliance/CompliancePage'
 import { RemoteSessionsPage } from '@/modules/remote/RemoteSessionsPage'
+import { ScriptsPage } from '@/modules/scripts/ScriptsPage'
 import { InsightsPage } from '@/modules/insights/InsightsPage'
 import { ApplicationDetailPage, ApplicationsPage } from '@/modules/applications/ApplicationsPage'
 import { WorkspacePage } from '@/modules/workspace/WorkspacePage'
@@ -104,6 +105,7 @@ createRoot(document.getElementById('root')!).render(
               <Route path="applications/:id" element={<Gate perm="applications:read"><ApplicationDetailPage /></Gate>} />
               <Route path="workspace" element={<Gate perm="self:read"><WorkspacePage /></Gate>} />
               <Route path="remote-sessions" element={<GateAny perms={['devices:read', 'devices:read_assigned']}><RemoteSessionsPage /></GateAny>} />
+              <Route path="scripts" element={<Gate perm="devices:shell"><ScriptsPage /></Gate>} />
               <Route path="insights" element={<GateAny perms={['devices:read', 'devices:read_assigned']}><InsightsPage /></GateAny>} />
               <Route path="policies" element={<Gate perm="policies:read"><PoliciesPage /></Gate>} />
               <Route path="policies/:id" element={<Gate perm="policies:read"><PolicyDetailPage /></Gate>} />

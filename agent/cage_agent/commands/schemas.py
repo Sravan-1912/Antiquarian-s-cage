@@ -16,6 +16,7 @@ ROUTE = {
     "assist.start": "agent", "assist.end": "agent",
     "rdp.start": "agent", "rdp.end": "agent",
     "shell.start": "agent", "shell.end": "agent",
+    "script.run": "agent",  # scripts library: run a saved script in the agent's context, report its output
 }
 ALLOWED_COMMANDS = set(ROUTE)
 COMMON = {"reason", "requested_by"}
@@ -91,6 +92,17 @@ def validate_command_params(command: str, p) -> dict:
     elif command == "shell.end":
         _keys(p, {"session_id"})
         uuid.UUID(_str(p, "session_id", 36))
+    elif command == "script.run":
+        _keys(p, {"run_id", "interpreter", "content", "timeout_seconds"})
+        uuid.UUID(_str(p, "run_id", 36))
+        if p.get("interpreter") not in ("powershell", "cmd", "bash"):
+            raise ValueError("interpreter must be powershell, cmd or bash")
+        c = p.get("content")
+        if not isinstance(c, str) or not 1 <= len(c) <= 65_536:
+            raise ValueError("content must be 1..65536 chars")
+        t = p.get("timeout_seconds")
+        if not isinstance(t, int) or isinstance(t, bool) or not 5 <= t <= 3600:
+            raise ValueError("timeout_seconds must be 5..3600")
     else:
         raise ValueError("unknown command")
     return p

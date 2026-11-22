@@ -304,6 +304,10 @@ def on_job_result(db: Session, device: Device, job: CommandJob, status: str, det
                      result="success" if status == "succeeded" else "failure",
                      metadata={"session_id": str(s.id), "cleanup": status, "detail": (detail or "")[:300]})
         return
+    if job.command == "script.run":
+        from app.services import scripts
+        scripts.record_result(db, device, job, status, detail, state)
+        return
     audit.record(db, device.organization_id, actor, f"remote.{job.command}.result", target_type="command_job",
                  target_id=job.id, target_label=job.command, result="success" if status == "succeeded" else "failure",
                  metadata={"status": status, "detail": (detail or "")[:500]})

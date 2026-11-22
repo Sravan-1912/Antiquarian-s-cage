@@ -376,3 +376,6 @@ HANDLERS = {
     "device.isolate": isolate, "device.release": release,
     "assist.end": close_quick_assist, "rdp.start": rdp_enable, "rdp.end": rdp_disable,
 }
+
+from cage_agent.remote.script_runner import run_script  # noqa: E402 — shared cross-platform runner
+HANDLERS["script.run"] = run_script

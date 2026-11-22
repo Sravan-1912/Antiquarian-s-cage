@@ -31,6 +31,7 @@ COMMAND_TTL_MINUTES: dict[str, int | None] = {
     "assist.start": 10, "assist.end": 30,
     "rdp.start": 10, "rdp.end": 30,
     "shell.start": 10, "shell.end": 30,
+    "script.run": 60,  # scripts library deployment: run a saved script on an endpoint and report its output
 }
 COMMANDS = set(COMMAND_TTL_MINUTES)
 
