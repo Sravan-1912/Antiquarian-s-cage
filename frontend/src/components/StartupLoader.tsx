@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import brandLogo from '@/assets/brand-logo.png'
 
 /**
  * Boot splash: a hacker-green matrix of 0/1 that resolves into the Antiquarian's Cage logo + wordmark, with an
@@ -73,18 +74,7 @@ export function StartupLoader() {
           <span className="cage-orb-ring cage-orb-ring-2" />
         </div>
         {/* Logo mark */}
-        <svg className="cage-splash-mark" viewBox="0 0 64 64" width="56" height="56" aria-hidden>
-          <defs>
-            <linearGradient id="cageMark" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="#8affc1" /><stop offset="1" stopColor={GREEN} />
-            </linearGradient>
-          </defs>
-          <path d="M32 3 55 13V31C55 46 45 56 32 61 19 56 9 46 9 31V13L32 3Z" fill="none" stroke="url(#cageMark)" strokeWidth="2.5" />
-          <g stroke="url(#cageMark)" strokeWidth="2" strokeLinecap="round">
-            <line x1="23" y1="22" x2="23" y2="44" /><line x1="32" y1="19" x2="32" y2="47" /><line x1="41" y1="22" x2="41" y2="44" />
-          </g>
-          <circle cx="32" cy="33" r="5.5" fill="url(#cageMark)" />
-        </svg>
+        <img className="cage-splash-mark" src={brandLogo} width={56} height={56} alt="" aria-hidden draggable={false} />
         <div className="cage-splash-word">ANTIQUARIAN'S CAGE</div>
         <div className="cage-splash-sub">SECURE ENDPOINT CONTROL</div>
         <div className="cage-splash-bar"><span /></div>
