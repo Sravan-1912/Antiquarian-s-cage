@@ -15,6 +15,29 @@ import { cn } from '@/utils/format'
  */
 interface Opt { value: string; label: React.ReactNode; disabled?: boolean }
 
+/**
+ * The nearest ancestor that becomes the containing block for `position: fixed` descendants — any element with a
+ * transform / perspective / filter / will-change / contain (e.g. a Radix dialog centred with -translate-x/y-1/2).
+ * When one exists, a fixed child is positioned relative to ITS box, not the viewport, so we must offset by its rect.
+ */
+function fixedContainingBlock(el: HTMLElement): HTMLElement | null {
+  let n = el.parentElement
+  while (n && n !== document.body) {
+    const s = getComputedStyle(n)
+    if (
+      (s.transform && s.transform !== 'none') ||
+      (s.perspective && s.perspective !== 'none') ||
+      (s.filter && s.filter !== 'none') ||
+      s.willChange.split(',').some((v) => ['transform', 'perspective', 'filter'].includes(v.trim())) ||
+      (s.contain && /(^|\s)(paint|layout|strict|content)(\s|$)/.test(s.contain))
+    ) {
+      return n
+    }
+    n = n.parentElement
+  }
+  return null
+}
+
 function parseOptions(children: React.ReactNode): Opt[] {
   const out: Opt[] = []
   React.Children.forEach(children, (child) => {
@@ -44,17 +67,30 @@ export const Select = React.forwardRef<HTMLButtonElement, Props>(function Select
   const selected = options.find((o) => o.value === current) ?? options[0]
   const [open, setOpen] = React.useState(false)
   const [active, setActive] = React.useState(0)
-  const [pos, setPos] = React.useState<{ left: number; top: number; width: number; up: boolean } | null>(null)
+  const [pos, setPos] = React.useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null)
+  const [hostEl, setHostEl] = React.useState<HTMLElement | null>(null)
   const btnRef = React.useRef<HTMLButtonElement | null>(null)
   const menuRef = React.useRef<HTMLDivElement | null>(null)
   const setBtn = (n: HTMLButtonElement | null) => { btnRef.current = n; if (typeof ref === 'function') ref(n); else if (ref) ref.current = n }
 
   const place = React.useCallback(() => {
-    const r = btnRef.current?.getBoundingClientRect()
-    if (!r) return
+    const btn = btnRef.current
+    if (!btn) return
+    const r = btn.getBoundingClientRect()
+    // Position relative to the fixed-positioning containing block (a transformed dialog, etc.), else the viewport.
+    const cb = fixedContainingBlock(btn)
+    const cbRect = cb?.getBoundingClientRect()
+    const ox = cbRect?.left ?? 0
+    const oyTop = cbRect?.top ?? 0
+    const cbBottom = cbRect?.bottom ?? window.innerHeight
     const below = window.innerHeight - r.bottom
     const up = below < 260 && r.top > below
-    setPos({ left: r.left, top: up ? r.top : r.bottom, width: r.width, up })
+    setHostEl(cb ?? (typeof document !== 'undefined' ? document.body : null))
+    setPos({
+      left: r.left - ox,
+      width: r.width,
+      ...(up ? { bottom: cbBottom - r.top + 4 } : { top: r.bottom - oyTop + 4 }),
+    })
   }, [])
 
   const openMenu = () => {
@@ -99,8 +135,6 @@ export const Select = React.forwardRef<HTMLButtonElement, Props>(function Select
     else if (e.key === 'Tab') setOpen(false)
   }
 
-  const host = (btnRef.current?.closest('[role="dialog"]') as HTMLElement | null) ?? (typeof document !== 'undefined' ? document.body : null)
-
   return (
     <>
       <button
@@ -111,11 +145,11 @@ export const Select = React.forwardRef<HTMLButtonElement, Props>(function Select
         <span className="truncate text-left">{selected ? selected.label : ''}</span>
         <ChevronDown className={cn('size-4 shrink-0 opacity-60 transition-transform', open && 'rotate-180')} />
       </button>
-      {open && pos && host && createPortal(
+      {open && pos && hostEl && createPortal(
         <div
           ref={menuRef} role="listbox" tabIndex={-1} className="cage-select-menu"
           style={{ position: 'fixed', left: pos.left, width: pos.width, zIndex: 70,
-            ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
+            ...(pos.top !== undefined ? { top: pos.top } : { bottom: pos.bottom }) }}
         >
           {options.map((o, i) => (
             <div
@@ -130,7 +164,7 @@ export const Select = React.forwardRef<HTMLButtonElement, Props>(function Select
             </div>
           ))}
         </div>,
-        host,
+        hostEl,
       )}
     </>
   )
