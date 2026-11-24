@@ -125,7 +125,7 @@ class Agent:
                                                 "uptime_seconds": int(time.time() - psutil.boot_time()),
                                                 **network_counters()})
         self.server_status = resp.get("status", "unknown")
-        self.cfg.heartbeat_interval_seconds = max(15, int(resp.get("heartbeat_interval_seconds", 60)))
+        self.cfg.heartbeat_interval_seconds = max(5, int(resp.get("heartbeat_interval_seconds", 60)))
         self.cfg.inventory_interval_seconds = max(300, int(resp.get("inventory_interval_seconds", 3600)))
         if resp.get("certificate_renewal_due"):
             self.renew_certificate()
@@ -206,11 +206,13 @@ class Agent:
             relay.start()
         try:
             while not self.stop.is_set():
+                hb: dict = {}
+                did_jobs = 0
                 try:
                     hb = self.heartbeat_once()
                     failures = 0
                     if hb.get("jobs_pending") and self.server_status == "active":
-                        self.jobs_once()
+                        did_jobs = self.jobs_once()
                     if self.server_status == "active":
                         self.telemetry_once()  # stream new-process telemetry every tick (cheap)
                     if self.server_status == "active" and time.monotonic() >= self.next_inventory:
@@ -234,7 +236,12 @@ class Agent:
                 except Exception:  # noqa: BLE001 — never let a collector bug kill the service silently
                     log.exception("unexpected error in agent loop")
                     failures += 1
-                wait = self.cfg.heartbeat_interval_seconds * (1 if failures == 0 else min(10, 2 ** failures))
+                if failures:
+                    wait = self.cfg.heartbeat_interval_seconds * min(10, 2 ** failures)  # back off on errors
+                elif (hb.get("jobs_pending") or did_jobs) and self.server_status == "active":
+                    wait = 2  # work is pending/was just run — poll fast so follow-up commands run near-instantly
+                else:
+                    wait = self.cfg.heartbeat_interval_seconds
                 self.stop.wait(wait)
         finally:
             if relay is not None:

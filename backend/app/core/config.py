@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     dev_outbox_dir: str = "var/outbox"
 
-    heartbeat_interval_seconds: int = 60
+    heartbeat_interval_seconds: int = 15  # base poll cadence; the agent fast-polls (≈2s) while jobs are pending
     offline_threshold_seconds: int = 180
     inventory_interval_seconds: int = 3600
     enrollment_token_max_minutes: int = 1440

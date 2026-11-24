@@ -65,10 +65,11 @@ class ShellManager:
 
     def _start(self, env: dict) -> None:
         p, job_id, sid = env["parameters"], env["job_id"], env["parameters"]["session_id"]
-        if p.get("elevated"):
-            self.report(job_id, {"status": "needs_attention", "detail": "An elevated (SYSTEM/root) live-response shell "
-                                 "is not available yet; request a user-session shell."})
-            return
+        # The agent is installed as an elevated task, so its token already carries Administrators — an "elevated"
+        # request runs the shell in that elevated context. (True SYSTEM/root via the privileged broker is a separate
+        # future enhancement; Administrator covers virtually all live-response needs.)
+        elevated = bool(p.get("elevated"))
+        ctx = "Administrator" if elevated else "user session"
         # Banner first — the shell is never opened without a visible indicator (same fail-closed rule as RDP/assist).
         if _IS_WIN:
             if not _interactive():
