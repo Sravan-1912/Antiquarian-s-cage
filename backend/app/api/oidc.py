@@ -64,6 +64,11 @@ def authorize(request: Request, db: Session = Depends(get_db)):
         oidc._event(db, app, user, "sso_authorize", False, "not_assigned", ci.ip, ci.user_agent)
         db.commit()
         return back(error="access_denied", error_description="You have not been granted access to this application")
+    posture_ok, posture_reason = oidc.device_posture_ok(db, app, user)
+    if not posture_ok:
+        oidc._event(db, app, user, "sso_authorize", False, "device_posture", ci.ip, ci.user_agent)
+        db.commit()
+        return back(error="access_denied", error_description=f"Device policy: {posture_reason}")
     code = oidc.issue_code(db, app, user, params, amr, sess.created_at or datetime.now(timezone.utc), ci.ip,
                            ci.user_agent)
     return back(code=code)

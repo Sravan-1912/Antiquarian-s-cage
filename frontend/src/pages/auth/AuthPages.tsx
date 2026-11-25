@@ -1,16 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { KeyRound } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AuthLayout } from '@/layouts/AuthLayout'
 import { Alert, Button, Field, Input, Spinner } from '@/components/ui/primitives'
 import { api, describeError } from '@/services/api'
 import { useAuth } from '@/hooks/useAuth'
-import { describePasskeyError, passkeysSupported, rememberNext, safeNext, signInWithPasskey, takeNext } from '@/services/passkeys'
-
-function PasswordHint() {
-  return <>At least 12 characters with three of: lowercase, uppercase, digit, symbol. Avoid names and common words.</>
-}
+import { safeNext } from '@/services/passkeys'
 
 export function LoginPage() {
   const { me, refresh } = useAuth()
@@ -19,21 +14,18 @@ export function LoginPage() {
   const next = safeNext(params.get('next'))
   const appName = params.get('app')
   const stepUp = params.get('step_up') === '1'
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [pkBusy, setPkBusy] = useState(false)
   const setup = useQuery({ queryKey: ['bootstrap'], queryFn: () => api.get<{ needs_setup: boolean }>('/auth/bootstrap-status') })
 
-  useEffect(() => {  // already signed in and returning to an application (no step-up needed) → continue the SSO flow
-    if (me && next && !stepUp) window.location.assign(next)
-  }, [me, next, stepUp])
-
+  if (me && me.must_change_password) return <Navigate to="/change-password" replace />
+  if (me && next && !stepUp) { window.location.assign(next); return null }  // already signed in, returning to an app
   if (me && !next) return <Navigate to="/" replace />
   if (setup.data?.needs_setup) return <Navigate to="/setup" replace />
 
-  async function done() {
+  async function done(mustChange: boolean) {
+    if (mustChange) { nav('/change-password'); return }
     if (next) { window.location.assign(next); return }
     await refresh()
     nav('/')
@@ -41,94 +33,72 @@ export function LoginPage() {
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    setBusy(true)
-    setError(null)
+    setBusy(true); setError(null)
     try {
-      const r = await api.post<{ mfa_required: boolean }>('/auth/login', { email, password })
-      if (r.mfa_required) { rememberNext(next); nav('/mfa') } else await done()
+      const r = await api.post<{ must_change_password: boolean }>('/auth/login', form)
+      await refresh()
+      await done(r.must_change_password)
     } catch (err) {
       setError(describeError(err))
     } finally {
       setBusy(false)
-      setPassword('')
-    }
-  }
-
-  async function passkey() {
-    setPkBusy(true)
-    setError(null)
-    try {
-      await signInWithPasskey()
-      await done()
-    } catch (err) {
-      setError(describePasskeyError(err) ?? describeError(err))
-    } finally {
-      setPkBusy(false)
     }
   }
 
   const subtitle = appName ? `to continue to ${appName}` : 'Antiquarian\'s Cage console and workspace'
   return (
-    <AuthLayout title="Sign in" subtitle={subtitle}
-      footer={<Link to="/forgot-password" className="text-emerald-400 hover:text-emerald-300">Forgot your password?</Link>}>
-      <div className="space-y-4">
-        {stepUp && <Alert tone="warning">{appName ?? 'This application'} requires multi-factor sign-in. Use a passkey, or sign in with your password and authenticator code.</Alert>}
+    <AuthLayout title="Sign in" subtitle={subtitle}>
+      <form onSubmit={submit} className="space-y-4">
+        {stepUp && <Alert tone="warning">{appName ?? 'This application'} requires a stronger sign-in. Add a passkey from Account security, then sign in with it.</Alert>}
         {error && <Alert>{error}</Alert>}
-        {passkeysSupported() && (
-          <>
-            <Button type="button" variant={stepUp ? 'primary' : 'secondary'} className="w-full" onClick={passkey} loading={pkBusy}><KeyRound />Sign in with a passkey</Button>
-            <div className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-silver-600"><span className="h-px flex-1 bg-ink-700" />or<span className="h-px flex-1 bg-ink-700" /></div>
-          </>
-        )}
-        <form onSubmit={submit} className="space-y-4">
-          <Field label="Work email" htmlFor="email">
-            <Input id="email" type="email" autoComplete="username webauthn" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} />
-          </Field>
-          <Field label="Password" htmlFor="password">
-            <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
-          </Field>
-          <Button type="submit" className="w-full" variant={stepUp ? 'secondary' : 'primary'} loading={busy}>Sign in with password</Button>
-        </form>
-      </div>
+        <Field label="Work email" htmlFor="email"><Input id="email" type="email" required autoComplete="username" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+        <Field label="Password" htmlFor="password"><Input id="password" type="password" required autoComplete="current-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+        <Button type="submit" variant="primary" className="w-full" loading={busy}>Sign in</Button>
+        <p className="text-center text-xs text-silver-600">Were you given a temporary password? Sign in with it — you will be asked to set your own.</p>
+      </form>
     </AuthLayout>
   )
 }
 
-export function MfaChallengePage() {
-  const { refresh } = useAuth()
+/** Change your own password. Used both for the forced change after a handover and for a voluntary change. */
+export function ChangePasswordPage() {
+  const { me, refresh, logout } = useAuth()
   const nav = useNavigate()
-  const [code, setCode] = useState('')
+  const [form, setForm] = useState({ current_password: '', new_password: '', confirm: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  if (!me) return <Navigate to="/login" replace />
+  const forced = me.must_change_password
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value })
+
   async function submit(e: FormEvent) {
     e.preventDefault()
-    setBusy(true)
     setError(null)
+    if (form.new_password !== form.confirm) { setError('The new passwords do not match.'); return }
+    setBusy(true)
     try {
-      await api.post('/auth/mfa/verify', { code })
-      const next = takeNext()
-      if (next) { window.location.assign(next); return }
+      await api.post('/auth/password', { current_password: form.current_password, new_password: form.new_password })
       await refresh()
       nav('/')
     } catch (err) {
       setError(describeError(err))
-      setCode('')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <AuthLayout title="Two-step verification" subtitle="Enter the 6-digit code from your authenticator app."
-      footer={<Link to="/login" className="text-silver-400 hover:text-silver-200">Use a different account</Link>}>
+    <AuthLayout title={forced ? 'Set your password' : 'Change your password'}
+      subtitle={forced ? 'You signed in with a temporary password. Choose your own to continue.' : 'Choose a new password. Other sessions will be signed out.'}>
       <form onSubmit={submit} className="space-y-4">
         {error && <Alert>{error}</Alert>}
-        <Field label="Authentication code" htmlFor="code">
-          <Input id="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,8}" maxLength={8} required autoFocus
-            className="font-mono tracking-[0.4em]" value={code} onChange={(e) => setCode(e.target.value)} />
-        </Field>
-        <Button type="submit" className="w-full" loading={busy}>Verify</Button>
+        <Field label={forced ? 'Temporary password' : 'Current password'} htmlFor="cur"><Input id="cur" type="password" required autoComplete="current-password" value={form.current_password} onChange={set('current_password')} /></Field>
+        <Field label="New password" htmlFor="new"><Input id="new" type="password" required minLength={12} autoComplete="new-password" value={form.new_password} onChange={set('new_password')} /></Field>
+        <Field label="Confirm new password" htmlFor="conf"><Input id="conf" type="password" required minLength={12} autoComplete="new-password" value={form.confirm} onChange={set('confirm')} /></Field>
+        <p className="text-xs text-silver-600">At least 12 characters, using three of: lowercase, uppercase, digits, symbols.</p>
+        <Button type="submit" variant="primary" className="w-full" loading={busy}>Save password</Button>
+        {forced && <button type="button" className="w-full text-center text-xs text-silver-500 hover:text-silver-300" onClick={() => void logout()}>Sign out instead</button>}
       </form>
     </AuthLayout>
   )
@@ -148,41 +118,31 @@ export function SsoErrorPage() {
 }
 
 export function SetupPage() {
+  const { refresh } = useAuth()
   const nav = useNavigate()
-  const [form, setForm] = useState({ organization_name: '', full_name: '', email: '', password: '', confirm: '' })
+  const [form, setForm] = useState({ organization_name: '', full_name: '', email: '', password: '' })
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const setup = useQuery({ queryKey: ['bootstrap'], queryFn: () => api.get<{ needs_setup: boolean }>('/auth/bootstrap-status') })
 
   if (setup.isLoading) return <div className="grid h-full place-items-center"><Spinner /></div>
-  if (setup.data && !setup.data.needs_setup && !done) return <Navigate to="/login" replace />
+  if (setup.data && !setup.data.needs_setup) return <Navigate to="/login" replace />
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value })
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError(null)
-    if (form.password !== form.confirm) return setError('Passwords do not match.')
     setBusy(true)
     try {
-      const { confirm: _c, ...body } = form
-      void _c
-      const r = await api.post<{ detail: string }>('/auth/register', body)
-      setDone(r.detail)
+      await api.post('/auth/register', form)  // creates the org + first Super Admin and signs in
+      await refresh()
+      nav('/')
     } catch (err) {
       setError(describeError(err))
     } finally {
       setBusy(false)
     }
-  }
-
-  if (done) {
-    return (
-      <AuthLayout title="Check your email" subtitle={done}>
-        <Button className="w-full" variant="secondary" onClick={() => nav('/login')}>Go to sign in</Button>
-      </AuthLayout>
-    )
   }
 
   return (
@@ -191,117 +151,11 @@ export function SetupPage() {
         {error && <Alert>{error}</Alert>}
         <Field label="Organisation name" htmlFor="org"><Input id="org" required minLength={2} value={form.organization_name} onChange={set('organization_name')} /></Field>
         <Field label="Full name" htmlFor="name"><Input id="name" required minLength={2} autoComplete="name" value={form.full_name} onChange={set('full_name')} /></Field>
-        <Field label="Work email" htmlFor="email"><Input id="email" type="email" required autoComplete="email" value={form.email} onChange={set('email')} /></Field>
-        <Field label="Password" htmlFor="pw" hint={undefined}>
-          <Input id="pw" type="password" required minLength={12} autoComplete="new-password" value={form.password} onChange={set('password')} />
-          <p className="mt-1 text-xs text-silver-600"><PasswordHint /></p>
-        </Field>
-        <Field label="Confirm password" htmlFor="pw2"><Input id="pw2" type="password" required autoComplete="new-password" value={form.confirm} onChange={set('confirm')} /></Field>
+        <Field label="Work email" htmlFor="email"><Input id="email" type="email" required autoComplete="username" value={form.email} onChange={set('email')} /></Field>
+        <Field label="Password" htmlFor="pw"><Input id="pw" type="password" required minLength={12} autoComplete="new-password" value={form.password} onChange={set('password')} /></Field>
+        <p className="text-xs text-silver-600">At least 12 characters, using three of: lowercase, uppercase, digits, symbols.</p>
         <Button type="submit" className="w-full" loading={busy}>Create organisation</Button>
       </form>
     </AuthLayout>
   )
 }
-
-/** Runs a one-shot token action (email verification) on mount. */
-export function VerifyEmailPage() {
-  const [params] = useSearchParams()
-  const token = params.get('token') ?? ''
-  const [state, setState] = useState<{ ok: boolean; msg: string } | null>(null)
-  const ran = useRef(false)
-  useEffect(() => {
-    if (ran.current) return
-    ran.current = true
-    api.post<{ detail: string }>('/auth/verify-email', { token })
-      .then((r) => setState({ ok: true, msg: r.detail }))
-      .catch((e) => setState({ ok: false, msg: describeError(e) }))
-  }, [token])
-  return (
-    <AuthLayout title="Email verification">
-      {!state ? <Spinner /> : <div className="space-y-4"><Alert tone={state.ok ? 'success' : 'danger'}>{state.msg}</Alert>
-        <Button asChild className="w-full" variant="secondary"><Link to="/login">Go to sign in</Link></Button></div>}
-    </AuthLayout>
-  )
-}
-
-export function ForgotPasswordPage() {
-  const [email, setEmail] = useState('')
-  const [msg, setMsg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
-      const r = await api.post<{ detail: string }>('/auth/password/forgot', { email })
-      setMsg(r.detail)
-    } catch (err) {
-      setError(describeError(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <AuthLayout title="Reset your password" subtitle="We will email a single-use link valid for 30 minutes."
-      footer={<Link to="/login" className="text-emerald-400 hover:text-emerald-300">Back to sign in</Link>}>
-      {msg ? <Alert tone="success">{msg}</Alert> : (
-        <form onSubmit={submit} className="space-y-4">
-          {error && <Alert>{error}</Alert>}
-          <Field label="Work email" htmlFor="email"><Input id="email" type="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-          <Button type="submit" className="w-full" loading={busy}>Send reset link</Button>
-        </form>
-      )}
-    </AuthLayout>
-  )
-}
-
-function SetPasswordForm({ endpoint, field, title, subtitle }: { endpoint: string; field: 'new_password' | 'password'; title: string; subtitle: string }) {
-  const [params] = useSearchParams()
-  const token = params.get('token') ?? ''
-  const [pw, setPw] = useState('')
-  const [confirm, setConfirm] = useState('')
-  const [msg, setMsg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    if (pw !== confirm) return setError('Passwords do not match.')
-    setBusy(true)
-    try {
-      const r = await api.post<{ detail: string }>(endpoint, { token, [field]: pw })
-      setMsg(r.detail)
-    } catch (err) {
-      setError(describeError(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <AuthLayout title={title} subtitle={subtitle}>
-      {msg ? (
-        <div className="space-y-4"><Alert tone="success">{msg}</Alert>
-          <Button asChild className="w-full" variant="secondary"><Link to="/login">Go to sign in</Link></Button></div>
-      ) : (
-        <form onSubmit={submit} className="space-y-4">
-          {!token && <Alert>This link is missing its token. Use the link from your email.</Alert>}
-          {error && <Alert>{error}</Alert>}
-          <Field label="New password" htmlFor="pw">
-            <Input id="pw" type="password" required minLength={12} autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} />
-            <p className="mt-1 text-xs text-silver-600"><PasswordHint /></p>
-          </Field>
-          <Field label="Confirm password" htmlFor="pw2"><Input id="pw2" type="password" required autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></Field>
-          <Button type="submit" className="w-full" loading={busy} disabled={!token}>Set password</Button>
-        </form>
-      )}
-    </AuthLayout>
-  )
-}
-
-export const ResetPasswordPage = () => (
-  <SetPasswordForm endpoint="/auth/password/reset" field="new_password" title="Choose a new password" subtitle="All existing sessions will be signed out." />
-)
-export const AcceptInvitePage = () => (
-  <SetPasswordForm endpoint="/auth/invite/accept" field="password" title="Activate your account" subtitle="Set a password to finish accepting your administrator invitation." />
-)

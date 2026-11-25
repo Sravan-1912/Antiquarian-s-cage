@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import utcnow
 from app.models import (
-    AlertEvent, AuditLog, AuthenticationEvent, Device, EndpointPolicy, PolicyAssignment, PolicyDeployment,
+    AlertEvent, AuditLog, AuthenticationEvent, Device, Employee, EndpointPolicy, PolicyAssignment, PolicyDeployment,
     SecurityAlert, User,
 )
 from app.services import notifications
@@ -40,8 +40,12 @@ RULES: dict[str, dict] = {
     "deployment_failures": {"name": "Repeated policy deployment failures", "kind": "operational"},
     "admin_activity_burst": {"name": "Unusual administrative activity", "kind": "suspicious_activity"},
     "authz_denied_burst": {"name": "Repeated permission denials", "kind": "suspicious_activity"},
+    "edr_detection": {"name": "Endpoint threat detection", "kind": "suspicious_activity"},  # EDR telemetry rule match
     "remote_access_anomaly": {"name": "Suspicious remote access activity", "kind": "suspicious_activity"},
+    "geofence_violation": {"name": "Endpoint located outside an allowed region", "kind": "suspicious_activity"},
+    "impossible_travel": {"name": "Impossible travel between endpoint locations", "kind": "suspicious_activity"},
     "audit_integrity": {"name": "Audit log integrity check failed", "kind": "suspicious_activity"},
+    "phone_approval_refused": {"name": "Sign-in approval refused on phone", "kind": "suspicious_activity"},
     "audit_anchor_failed": {"name": "Audit anchor not written externally", "kind": "operational"},
 }
 
@@ -66,12 +70,21 @@ def raise_alert(db: Session, org_id: uuid.UUID, rule_key: str, *, title: str, de
         if escalated and severity in NOTIFY_AT:
             _notify(db, existing)
         return existing
-    if device_id and employee_id is None:
-        d = db.get(Device, device_id)
-        employee_id = d.employee_id if d else None
+    # Admin isolation: an alert belongs to the admin that owns the device/employee it is about (NULL = org-wide,
+    # e.g. an authentication alert not tied to a managed endpoint — visible to Super Admins).
+    owner_admin_id = None
+    dev = db.get(Device, device_id) if device_id else None
+    if dev is not None:
+        owner_admin_id = dev.owner_admin_id
+        if employee_id is None:
+            employee_id = dev.employee_id
+    if owner_admin_id is None and employee_id is not None:
+        emp = db.get(Employee, employee_id)
+        owner_admin_id = emp.owner_admin_id if emp else None
     a = SecurityAlert(id=uuid.uuid4(), organization_id=org_id, rule_key=rule_key, kind=RULES[rule_key]["kind"],
                       title=title[:200], description=description, severity=severity, device_id=device_id,
                       employee_id=employee_id, subject_user_id=subject_user_id, subject_label=subject_label,
+                      owner_admin_id=owner_admin_id,
                       detected_at=now, last_seen_at=now, dedup_key=dedup_key[:200], evidence=evidence or {},
                       auto_resolvable=auto_resolvable)
     db.add(a)
@@ -79,6 +92,18 @@ def raise_alert(db: Session, org_id: uuid.UUID, rule_key: str, *, title: str, de
     db.add(AlertEvent(alert_id=a.id, kind="created", actor_label="detection", details={"rule": rule_key}))
     if severity in NOTIFY_AT:
         _notify(db, a)
+    try:  # SIEM + chat egress (best-effort enqueue into the durable outboxes; never fails the alert)
+        from app.services import chat, siem
+        payload = siem.alert_payload(a)
+        siem.enqueue(db, org_id, payload, severity)
+        chat.enqueue(db, org_id, payload, severity)
+    except Exception:  # noqa: BLE001
+        pass
+    try:  # automated-response playbooks (SOAR) — best-effort, runs once per new alert
+        from app.services import playbooks
+        playbooks.evaluate(db, a)
+    except Exception:  # noqa: BLE001
+        pass
     return a
 
 

@@ -8,9 +8,18 @@ export interface Me {
   organization_name: string
   roles: Role[]
   permissions: string[]
-  mfa_enabled: boolean
   email_verified: boolean
   last_login_at: string | null
+  must_change_password: boolean
+}
+
+export interface AdminCreated { user: AdminUser; temporary_password: string }
+export interface Handover { user_id: string; email: string; temporary_password: string }
+export interface OrganizationCreated {
+  organization_id: string
+  organization_name: string
+  super_admin_email: string
+  temporary_password: string
 }
 
 export interface Page<T> { items: T[]; total: number; page: number; page_size: number }
@@ -47,7 +56,6 @@ export interface AdminUser {
   email: string
   full_name: string
   status: 'pending' | 'active' | 'disabled'
-  mfa_enabled: boolean
   email_verified_at: string | null
   last_login_at: string | null
   locked_until: string | null
@@ -154,11 +162,11 @@ export interface DashboardSummary {
     locked_accounts: number
     logins_by_day: { date: string; success: number; failure: number }[]
   }
-  administrators: { total: number; active: number; mfa_enabled: number }
+  administrators: { total: number; active: number; with_passkey: number; online: number }
   endpoints: ModuleStatus | EndpointSummary
   compliance: ModuleStatus | ComplianceDash
   policies: ModuleStatus | PolicyDash
-  alerts: ModuleStatus
+  alerts: ModuleStatus | AlertDash
   recent_activity: { id: string; action: string; actor: string; target: string | null; result: string; created_at: string }[]
   recent_activity_visible: boolean
 }
@@ -208,13 +216,14 @@ export interface Inventory {
 export interface DeviceCertificate { id: string; serial: string; fingerprint_sha256: string; not_before: string; not_after: string; status: string; revoked_at: string | null; revoked_reason: string | null; created_at: string }
 export interface DeviceEvent { id: string; kind: string; details: Record<string, unknown>; actor_id: string | null; created_at: string }
 export interface Heartbeat { received_at: string; source_ip: string | null; agent_version: string | null; uptime_seconds: number | null }
+export interface RiskScore { score: number; level: 'low' | 'medium' | 'high' | 'critical'; factors: { factor: string; detail: string; points: number }[] }
 
 export interface EnrollmentToken {
   id: string
   label: string
   employee_id: string | null
   created_at: string
-  expires_at: string
+  expires_at: string | null
   used_at: string | null
   used_by_device_id: string | null
   revoked_at: string | null
@@ -235,6 +244,26 @@ export interface EndpointSummary {
   enrollments_by_day: { date: string; count: number }[]
   compliance_states: Record<string, number>
   offline_threshold_seconds: number
+  last_contact: { online: number; under_1h: number; '1h_24h': number; '1d_7d': number; over_7d: number; never: number }
+  platforms: { platform: string; count: number }[]
+  network: NetworkUsage
+}
+
+export interface NetworkUsage {
+  window_hours: number
+  devices_reporting: number
+  bytes_sent: number
+  bytes_received: number
+  avg_sent: number | null
+  avg_received: number | null
+}
+
+export interface AlertDash {
+  available: true
+  open_by_severity: Record<'critical' | 'high' | 'medium' | 'low' | 'informational', number>
+  open_total: number
+  unassigned: number
+  detected_by_day: { date: string; count: number }[]
 }
 
 export type PolicyCategory = 'firewall' | 'bitlocker' | 'usb' | 'antivirus' | 'screen_lock' | 'windows_update' | 'password'
@@ -297,9 +326,9 @@ export interface DeviceCompliance {
   history: { evaluated_at: string; score: number; state: string }[]
 }
 export interface ComplianceDash { available: true; compliant: number; non_compliant: number; unknown: number; trend: { date: string; average_score: number | null; non_compliant: number }[] }
-export interface PolicyDash { available: true; active_policies: number; pending: number; by_status: Partial<Record<DeploymentStatus, number>>; success_rate: number | null }
+export interface PolicyDash { available: true; active_policies: number; total_policies: number; inactive_policies: number; pending: number; by_status: Partial<Record<DeploymentStatus, number>>; success_rate: number | null }
 
-export type RemoteCommand = 'device.inspect' | 'device.lock' | 'device.restart' | 'device.restart_cancel' | 'account.disable' | 'account.enable' | 'account.remove_admin'
+export type RemoteCommand = 'device.inspect' | 'device.lock' | 'device.restart' | 'device.restart_cancel' | 'device.shutdown' | 'device.logoff' | 'account.disable' | 'account.enable' | 'account.remove_admin' | 'device.isolate' | 'device.release'
 export interface RemoteAction {
   id: string
   device_id: string
@@ -321,6 +350,8 @@ export interface RemoteSession {
   device_name: string | null
   requested_by_label: string
   reason: string
+  mode: 'assist' | 'rdp' | 'shell' | 'screen'
+  connection: string | null
   require_consent: boolean
   max_minutes: number
   status: SessionStatus
@@ -342,6 +373,7 @@ export interface InspectState {
   logged_on_users?: string[]
   process_count?: number
   disks?: { mount: string; free_percent: number }[]
+  top_processes?: { pid: number; name: string; mem_percent: number }[]
   local_accounts?: { name: string; enabled: boolean; last_logon: string | null; sid: string }[]
   administrators?: { name: string; source: string }[]
   local_accounts_error?: string

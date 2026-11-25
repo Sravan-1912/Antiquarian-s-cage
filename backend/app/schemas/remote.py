@@ -38,21 +38,31 @@ class AccountParams(_P):
 
 ACTION_SCHEMAS: dict[str, type[_P]] = {
     "device.inspect": NoParams, "device.lock": NoParams, "device.restart": RestartParams,
-    "device.restart_cancel": NoParams, "account.disable": AccountParams, "account.enable": AccountParams,
-    "account.remove_admin": AccountParams,
+    "device.restart_cancel": NoParams, "device.shutdown": RestartParams, "device.logoff": NoParams,
+    "account.disable": AccountParams, "account.enable": AccountParams, "account.remove_admin": AccountParams,
+    # Network isolation (killswitch): server_host is injected server-side so the broker keeps the agent→backend
+    # channel open (otherwise the endpoint could never be released).
+    "device.isolate": NoParams, "device.release": NoParams,
 }
 # Actions that change the device's availability or accounts need the operator to re-enter their password.
-SENSITIVE = {"device.restart", "account.disable", "account.enable", "account.remove_admin"}
+SENSITIVE = {"device.restart", "device.shutdown", "device.logoff", "account.disable", "account.enable",
+             "account.remove_admin", "device.isolate", "device.release"}
 
-ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.restart_cancel", "account.disable",
-                     "account.enable", "account.remove_admin"]
+ActionName = Literal["device.inspect", "device.lock", "device.restart", "device.restart_cancel", "device.shutdown",
+                     "device.logoff", "account.disable", "account.enable", "account.remove_admin",
+                     "device.isolate", "device.release"]
+
+
+class StepUp(BaseModel):
+    """Re-entry of the signed-in admin's password, confirming a sensitive action."""
+    password: str = Field(min_length=1, max_length=200)
 
 
 class ActionRequest(BaseModel):
     command: ActionName
     parameters: dict = Field(default_factory=dict)
     reason: str = Field(min_length=3, max_length=500)
-    confirm_password: str | None = Field(default=None, max_length=256)
+    step_up: StepUp | None = None
 
 
 class ActionOut(ORMModel):
@@ -73,7 +83,30 @@ class ActionOut(ORMModel):
 class AssistRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
     max_minutes: int = Field(default=30, ge=5, le=120)
-    confirm_password: str = Field(min_length=1, max_length=256)
+    step_up: StepUp | None = None
+
+
+class RdpRequest(BaseModel):
+    """Start an unattended Remote Desktop session. No consent and no password step-up (by design), but the endpoint
+    always shows a visible 'Remote desktop active' banner for the whole session."""
+    reason: str = Field(min_length=5, max_length=500)
+    max_minutes: int = Field(default=30, ge=5, le=120)
+
+
+class ShellRequest(BaseModel):
+    """Open an interactive live-response shell. Arbitrary command execution (break-glass): RBAC-gated, the endpoint
+    always shows a visible banner, and every command + output is written to the audit trail. `elevated` runs it as
+    SYSTEM/root (needs devices:shell_elevated)."""
+    reason: str = Field(min_length=5, max_length=500)
+    max_minutes: int = Field(default=30, ge=5, le=120)
+    elevated: bool = False
+
+
+class ScreenRequest(BaseModel):
+    """Start an unattended remote-screen session: the agent captures the screen and injects input over the relay (works
+    on any Windows edition, incl. Home). No consent/step-up, but the endpoint always shows a visible banner."""
+    reason: str = Field(min_length=5, max_length=500)
+    max_minutes: int = Field(default=30, ge=5, le=120)
 
 
 class TerminateRequest(BaseModel):
@@ -86,6 +119,8 @@ class SessionOut(ORMModel):
     device_name: str | None = None
     requested_by_label: str
     reason: str
+    mode: str = "assist"
+    connection: str | None = None
     require_consent: bool
     max_minutes: int
     status: str

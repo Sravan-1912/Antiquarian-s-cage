@@ -79,17 +79,19 @@ def consent(requester: str, reason: str, minutes: int, timeout: int) -> dict:
     return result
 
 
-def indicator(requester: str, reason: str, minutes: int) -> dict:
+def indicator(requester: str, reason: str, minutes: int, kind: str = "assist") -> dict:
     import tkinter as tk
+    label = {"rdp": "REMOTE DESKTOP ACTIVE", "shell": "LIVE-RESPONSE SHELL ACTIVE",
+             "screen": "REMOTE SCREEN ACTIVE"}.get(kind, "REMOTE ASSISTANCE ACTIVE")
     result = {"ended": "expired"}
     root = tk.Tk()
-    root.title("Remote assistance active")
+    root.title(label.title())
     root.overrideredirect(True)  # no title bar: cannot be minimised; stays visible on top
     root.attributes("-topmost", True)
     root.configure(bg=DANGER)
     frame = tk.Frame(root, bg=DANGER)
     frame.pack(padx=12, pady=6)
-    tk.Label(frame, text="●  REMOTE ASSISTANCE ACTIVE", font=("Segoe UI Semibold", 10), bg=DANGER, fg="white").pack(side="left")
+    tk.Label(frame, text=f"●  {label}", font=("Segoe UI Semibold", 10), bg=DANGER, fg="white").pack(side="left")
     info = tk.Label(frame, text="", font=("Segoe UI", 9), bg=DANGER, fg="white")
     info.pack(side="left", padx=12)
 
@@ -123,9 +125,10 @@ def main(argv=None) -> int:
     p.add_argument("--reason", required=True)
     p.add_argument("--minutes", type=int, required=True)
     p.add_argument("--timeout", type=int, default=120)
+    p.add_argument("--kind", choices=["assist", "rdp", "shell", "screen"], default="assist")
     a = p.parse_args(argv)
     out = consent(a.requester, a.reason, a.minutes, a.timeout) if a.mode == "consent" else \
-        indicator(a.requester, a.reason, a.minutes)
+        indicator(a.requester, a.reason, a.minutes, a.kind)
     print(json.dumps(out), flush=True)
     return 0
 

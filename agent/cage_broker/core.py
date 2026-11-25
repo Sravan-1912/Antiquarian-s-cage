@@ -70,7 +70,9 @@ class BrokerState:
 
 
 BROKER_ACTIONS = {"device.restart", "device.restart_cancel", "device.lock", "account.disable", "account.enable",
-                  "account.remove_admin", "assist.end"}  # assist.end: only closes Quick Assist (high integrity)
+                  "account.remove_admin", "assist.end",  # assist.end: only closes Quick Assist (high integrity)
+                  "rdp.start", "rdp.end",  # enable/disable native Remote Desktop + firewall (privileged)
+                  "device.isolate", "device.release"}  # network isolation / release (firewall lockdown, privileged)
 
 
 def _default_actions():

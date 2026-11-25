@@ -4,6 +4,13 @@ Status: **Design baseline (Phase 0)**. This document is the reference for every 
 Anything described here as "planned" is not implemented until the phase that delivers it is
 marked complete in `documentation/04-roadmap.md`.
 
+> **For the as-built architecture and the main flows as diagrams** (including the cross-network RDP relay, the
+> command-signing chain, enrollment, provisioning and auto-start), see
+> [`15-architecture-and-flows.md`](15-architecture-and-flows.md). Notable deltas from this baseline: console sign-in is
+> **password-based** (not the originally planned model); background jobs run in an **in-process scheduler** (not Celery);
+> and remote administration now includes **cross-network Remote Desktop/Assistance over a WebSocket relay** plus a
+> **privileged broker** (Windows) / **root agent** (Linux).
+
 ## 1. Requirements analysis (condensed)
 
 The platform has three trust domains and five functional pillars.
@@ -13,7 +20,7 @@ The platform has three trust domains and five functional pillars.
 | Identity & administration | Admin auth, MFA, RBAC, employees, JML workflows | 1, 5 |
 | Endpoint management | Agent, enrollment, inventory, heartbeat, lifecycle | 2 |
 | Security posture | Policies, deployment jobs, compliance engine | 3 |
-| Remote administration | Allowlisted commands, consented assistance sessions | 4 |
+| Remote administration | Allowlisted commands, consented assistance sessions, cross-network Remote Desktop over a relay | 4 |
 | Security operations | Alerts, tamper-evident audit, notifications, reports | 6 (audit core in 1) |
 
 Key non-functional requirements extracted from the brief:

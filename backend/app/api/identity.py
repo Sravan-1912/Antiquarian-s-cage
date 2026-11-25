@@ -125,6 +125,8 @@ class AppCreate(BaseModel):
     redirect_uris: list[str] = Field(min_length=1, max_length=10)
     launch_url: str | None = Field(default=None, max_length=512)
     mfa_required: bool = False
+    require_compliant_device: bool = False
+    max_risk_level: str = Field(default="any", pattern="^(any|low|medium|high)$")
 
     @field_validator("redirect_uris")
     @classmethod
@@ -142,6 +144,8 @@ class AppUpdate(BaseModel):
     redirect_uris: list[str] | None = Field(default=None, min_length=1, max_length=10)
     launch_url: str | None = Field(default=None, max_length=512)
     mfa_required: bool | None = None
+    require_compliant_device: bool | None = None
+    max_risk_level: str | None = Field(default=None, pattern="^(any|low|medium|high)$")
     status: str | None = Field(default=None, pattern="^(active|disabled)$")
 
     @field_validator("redirect_uris")
@@ -156,6 +160,7 @@ def _app_out(db: Session, a: Application, secret: str | None = None) -> dict:
     out = {"id": str(a.id), "name": a.name, "description": a.description, "protocol": a.protocol,
            "client_id": a.client_id, "client_type": a.client_type, "redirect_uris": (a.redirect_uris or {}).get("uris", []),
            "launch_url": a.launch_url, "mfa_required": a.mfa_required, "status": a.status,
+           "require_compliant_device": a.require_compliant_device, "max_risk_level": a.max_risk_level,
            "verified_at": a.verified_at, "created_at": a.created_at, "assigned_employees": n,
            "integration": "verified" if a.verified_at else "configured — not yet verified by a real sign-in"}
     if secret:
@@ -186,7 +191,8 @@ def create_app(body: AppCreate, ctx: AuthContext = Depends(APPS_MANAGE), db: Ses
                     client_id="cage-" + secrets.token_hex(12), client_type=body.client_type,
                     client_secret_hash=hash_token(secret) if secret else None,
                     redirect_uris={"uris": body.redirect_uris}, launch_url=body.launch_url,
-                    mfa_required=body.mfa_required, created_by=ctx.user.id)
+                    mfa_required=body.mfa_required, require_compliant_device=body.require_compliant_device,
+                    max_risk_level=body.max_risk_level, created_by=ctx.user.id)
     db.add(a)
     db.flush()
     audit.record(db, a.organization_id, ctx.actor, "application.registered", target_type="application", target_id=a.id,

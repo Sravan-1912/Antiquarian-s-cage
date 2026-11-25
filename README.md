@@ -3,16 +3,29 @@
 Endpoint management and workforce security platform: employee identity, Windows endpoint
 administration (agent), security policy & compliance, and tamper-evident security operations.
 
-> **Status: Phases 1–6 implemented** (foundation, endpoint management, security policies + compliance, remote
-> administration, identity security, security operations). Phase 7 (hardening and deployment) is next. What has actually been verified is in
-> `documentation/test-log.md`.
+> **New here?** Read [`documentation/00-complete-guide.md`](documentation/00-complete-guide.md) for the prose tour, or
+> [`documentation/15-architecture-and-flows.md`](documentation/15-architecture-and-flows.md) for a **diagram-first**
+> walkthrough (architecture, enrollment, the signing chain, the animated cross-network RDP relay, compliance, auto-start).
+
+> **Status:** Foundation, endpoint management, security policies + compliance, remote administration, identity
+> security, security operations, hardening, fleet overview, admin isolation and subscription/device quotas are
+> implemented. More recent work: **password authentication**, **Super-Admin organization/admin provisioning with
+> temp-password handover**, **cross-network Remote Desktop + Remote Assistance** over a relay (no VPN), a **privileged
+> broker**, **indefinite enrollment tokens**, a **cross-platform (Windows + Linux) agent**, **Windows/Linux auto-start
+> installers**, and an **Electron desktop app** + **single-service cloud deployment**. What has actually been verified
+> is in `documentation/test-log.md`; operating procedures are in `documentation/10-operations-runbook.md`.
+>
+> **Console sign-in is password-based** (PBKDF2-HMAC-SHA256). A **Super Admin** creates organizations and admins; each
+> new admin receives a **one-time temporary password** and is forced to reset it on first login. A break-glass CLI
+> (`python -m app.recover <email>`) recovers a sole Super Admin. WebAuthn passkeys remain available for SSO/MFA. See
+> `documentation/08-identity-and-sso.md`.
 
 ## Repository layout
 
 ```
 backend/          FastAPI + SQLAlchemy 2 + Alembic (Python 3.13+)
   app/core/       config, DB, logging, security headers, rate limiting
-  app/security/   Argon2id, AES-256-GCM, TOTP, tokens, permission catalogue
+  app/security/   WebAuthn passkeys, AES-256-GCM, tokens, permission catalogue
   app/models/     ORM models          app/services/  business logic + audit
   app/api/        routers (thin)      app/schemas/   Pydantic models
   migrations/     Alembic migrations  tests/         pytest suite
@@ -27,22 +40,22 @@ agent/            Windows endpoint agent (Python, separate from the backend) —
 | Area | What works |
 |---|---|
 | Bootstrap | First-run organisation + Super Admin registration; closes automatically once a user exists |
-| Authentication | Email verification, login, logout, password reset, change password, invitation acceptance |
-| MFA | TOTP (RFC 6238) with locally rendered QR, replay protection, AES-256-GCM-encrypted secrets |
+| Authentication | **Password** (PBKDF2-HMAC-SHA256). Super-Admin-created orgs and admins; one-time **temporary password** handover with forced reset on first login (`must_change_password`); logout; break-glass CLI (`python -m app.recover`) |
+| MFA / passkeys | WebAuthn passkeys available for step-up and SSO (user verification combines possession + biometric/PIN) |
 | Sessions | Opaque server-side sessions (hashed), idle + absolute expiry, list/revoke, revoke others |
 | Brute force | Per-IP rate limits, per-account lockout, lockout notifications, uniform error responses |
 | RBAC | 23 permissions, 5 built-in roles, enforced in backend dependencies; denials audited |
 | Administrators | Invite, change role, disable/enable, unlock, revoke sessions; last Super Admin protected |
 | Employees | Create, edit, joiner/mover/leaver workflows, suspend/reactivate/offboard, history, CSV export |
 | Audit | Append-only hash chain + HMAC, integrity verification, filters, CSV export, PG trigger blocks UPDATE/DELETE |
-| Dashboard | Real DB aggregates: workforce, sign-ins, MFA coverage, departments, joiners, activity timeline |
+| Dashboard | Real DB aggregates: workforce, sign-ins, passkey coverage, departments, joiners, activity timeline |
 | Shell | Sidebar, global search (Ctrl K, permission-filtered), notification centre, profile menu |
 
 ## Phase 2 features (implemented)
 
 | Area | What works |
 |---|---|
-| Enrollment | Single-use, short-lived tokens (shown once, stored hashed, optional employee pre-assignment, revocable) |
+| Enrollment | Single-use tokens (shown once, stored hashed, optional employee pre-assignment, revocable); validity 15 min–24 h **or "Never (indefinite)"** so you don't lose the ability to (re)enrol |
 | Device identity | Agent-generated P-256 key (DPAPI-protected), CSR → certificate from internal device CA, CN = server UUID |
 | Agent auth | Every request signed (timestamp ±5 min, single-use nonce, body hash) + mTLS at Nginx in production |
 | Heartbeat | Online/offline derived only from authenticated heartbeats with configurable interval/threshold |
@@ -68,8 +81,9 @@ See `documentation/06-policy-recovery.md` for rollback and manual recovery per p
 
 | Area | What works |
 |---|---|
-| Remote actions | Status inspection, lock, restart (warned, cancellable), cancel restart, disable/enable local account, remove from Administrators — signed, allowlisted, schema-checked by server, agent and broker; password re-entry for sensitive actions; last-admin protection |
-| Remote assistance | Consent prompt by default (auto-decline), always-on-top indicator with End button, Quick Assist launched only after consent, maximum duration, termination from either side, server + endpoint expiry, verified cleanup with privileged fallback, full audit trail |
+| Remote actions | Status inspection, lock, restart (warned, cancellable), cancel restart, **power off**, **log off**, disable/enable local account, remove from Administrators — signed, allowlisted, schema-checked by server, agent and broker; last-admin protection |
+| Remote Desktop | **Unattended RDP tunnelled over the relay — works across any network, no VPN, no inbound hole.** Mandatory on-screen banner (fail closed); broker enables native Windows RDP (or **xrdp** on Linux) and verifies a host came up (Windows **Home** can't host RDP → clear message); connect `mstsc` from the desktop app |
+| Remote assistance | Consent prompt by default, always-on-top indicator with End button, Quick Assist launched only after consent, maximum duration, termination from either side, server + endpoint expiry, verified cleanup with privileged fallback, full audit trail |
 | Console | Remote administration panel and local-accounts view per endpoint, action and session history, Remote sessions page, organisation remote-assistance policy (consent, max duration, IT Support access) |
 
 Details and limitations: `documentation/07-remote-administration.md`.
@@ -79,7 +93,7 @@ Details and limitations: `documentation/07-remote-administration.md`.
 | Area | What works |
 |---|---|
 | Employee accounts | Workspace invitation (Employee role), My workspace (apps + devices), suspend/reactivate, leaver revokes sessions, SSO grants and passkeys |
-| Passkeys | WebAuthn registration/sign-in (usernameless, user verification required, counts as MFA), naming, removal, admin revocation |
+| Passkeys | **The only console sign-in.** WebAuthn registration/sign-in (usernameless, user verification required, satisfies MFA), naming, removal, admin revocation, rate-limited sign-in |
 | SSO (OIDC provider) | Discovery, JWKS, authorization code + mandatory PKCE, RS256 ID/access tokens, userinfo, per-app MFA step-up, exact redirect matching, assignment checks at every step, authentication events per app |
 | Applications | Register confidential/public clients, secret shown once and stored hashed, rotation, enable/disable, assignments, "verified" only after a real sign-in |
 
@@ -96,6 +110,25 @@ Details: `documentation/08-identity-and-sso.md`. A sample relying party for test
 | Dashboard | Critical/open alert KPIs, severity distribution, alerts per day |
 
 Details: `documentation/09-security-operations.md`.
+
+## Phase 7 features (hardening)
+
+| Area | What works |
+|---|---|
+| Audit anchoring | Signed chain heads (Ed25519) in an append-only table + external file; detects tail truncation and rewrites; critical alert; offline verifier |
+| Performance | Constant query count on every list/summary/report endpoint (scaling test with 310 devices) |
+| E2E | Playwright suite (Edge) on an isolated stack: `cd frontend && npm run e2e` |
+| Backup/restore | `infrastructure/scripts/cage_backup.py backup|restore|drill` — encrypted, checksummed, drill verifies chain + anchors |
+| Production | Startup guards, `python -m app.preflight`, offline key creation, persistent key/anchor volumes, `.dockerignore` |
+| Docs | Runbook (`documentation/10-operations-runbook.md`), OpenAPI (`documentation/api/openapi.json`) |
+
+## Phases 8–9 (implemented)
+
+| Area | What works |
+|---|---|
+| Phone sign-in | _Console phone-approval sign-in was removed with the move to passkey-only._ A phone is still a first-class console passkey via standard WebAuthn (platform or cross-device/hybrid). The paired Cage Authenticator now covers Windows laptop unlock only — `documentation/12-windows-phone-unlock.md` |
+| Cage Authenticator | Expo/React Native app in `mobile/`; signed Android APK built locally (`mobile/build-android.ps1`); iOS project config ready, `.ipa` needs a Mac/EAS. Pairs a biometric-bound key for Windows laptop unlock |
+| Fleet overview | Health chip, users/devices/policies cards, platform and last-contact rings, network usage from agent byte counters |
 
 ## Local development
 
@@ -143,7 +176,7 @@ The API connects as the least-privilege `cage_app` role; migrations run as `cage
 
 * PostgreSQL 16.15 installed locally; dev DB `antiquarians_cage` and test DB `cage_test`, schema owned by
   `cage_owner`, API running as least-privilege `cage_app` (INSERT/SELECT only on `audit_logs`).
-* Backend: **60/60 pytest tests pass on PostgreSQL** (migrations as owner, API as `cage_app`), including the
+* Backend: **78/78 pytest tests pass on PostgreSQL** (Phase 7: anchoring, scaling, production guards) (migrations as owner, API as `cage_app`), including the
   append-only audit trigger test. Also passes on SQLite.
 * Frontend: typecheck, 4 Vitest tests and production build pass.
 * Agent: 39 pytest tests pass (validator, broker core, named pipe, registry rollback, remote actions, assistance
@@ -156,7 +189,7 @@ The API connects as the least-privilege `cage_app` role; migrations run as `cage
   audit/users/employee-create and 200 for permitted reads; denials appear in the audit log; chain verifies.
 * **Not yet verified:** policy changes applied by an *elevated* broker, broker/agent as Windows services /
   virtual service account, mTLS through Nginx, Docker Compose
-  stack, Playwright E2E suite, Redis-backed rate limiting, real SMTP delivery, Windows 10/Pro/domain-joined devices.
+  stack, Redis-backed rate limiting, real SMTP delivery, Windows 10/Pro/domain-joined devices.
 
 Run the suite against PostgreSQL:
 

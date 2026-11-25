@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import utcnow
@@ -18,6 +18,7 @@ class SecurityAlert(UUIDPk, Timestamps, Base):
                       Index("ix_alerts_dedup_open", "organization_id", "dedup_key", "status"))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"))
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)  # admin isolation
     rule_key: Mapped[str] = mapped_column(String(48))
     # configuration | operational | suspicious_activity — never "attack": an alert is a lead, not a verdict.
     kind: Mapped[str] = mapped_column(String(24))
@@ -77,3 +78,96 @@ class EmailOutbox(UUIDPk, Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     next_attempt_at: Mapped[datetime] = mapped_column(default=utcnow)
     sent_at: Mapped[datetime | None]
+
+
+class SiemDestination(UUIDPk, Base):
+    """Per-organization SIEM / webhook egress config. Security alerts are POSTed here as JSON so a SOC's
+    Splunk/Elastic/Datadog receives them. The token is stored AES-256-GCM-encrypted (never returned to the client)."""
+
+    __tablename__ = "siem_destinations"
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), unique=True)
+    url: Mapped[str] = mapped_column(String(2048))
+    auth_header: Mapped[str] = mapped_column(String(64), default="Authorization")
+    token_enc: Mapped[str | None] = mapped_column(Text)        # encrypted bearer / HEC token, or NULL
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    min_severity: Mapped[str] = mapped_column(String(12), default="low")  # low | medium | high | critical
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_success_at: Mapped[datetime | None]
+    last_error: Mapped[str | None] = mapped_column(String(500))
+
+
+class SiemDelivery(UUIDPk, Base):
+    """Durable outbox for SIEM egress — committed with the alert transaction, delivered by the scheduler with retries,
+    so a SIEM outage never silently drops a security event."""
+
+    __tablename__ = "siem_deliveries"
+    __table_args__ = (Index("ix_siem_deliv_status_next", "status", "next_attempt_at"),)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(12), default="pending")  # pending | sent | failed
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    next_attempt_at: Mapped[datetime] = mapped_column(default=utcnow)
+    sent_at: Mapped[datetime | None]
+
+
+class GeoSecurityPolicy(UUIDPk, Base):
+    """Per-organization location-security config: geo-fencing (allowed countries) and impossible-travel detection.
+    Evaluated whenever an endpoint reports a resolved location. One row per organization."""
+
+    __tablename__ = "geo_security_policies"
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), unique=True)
+    geofence_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    allowed_countries: Mapped[list] = mapped_column(JSON, default=list)   # e.g. ["India", "United States"]
+    on_violation: Mapped[str] = mapped_column(String(12), default="alert")  # alert | isolate
+    impossible_travel: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class ChatWebhook(UUIDPk, Base):
+    """Per-org chat alert channel — Slack / Microsoft Teams / Discord / generic JSON webhook. The webhook URL is a
+    secret (it grants posting), so it is stored AES-256-GCM-encrypted and never returned to clients."""
+
+    __tablename__ = "chat_webhooks"
+    __table_args__ = (UniqueConstraint("organization_id", "platform", name="uq_chat_org_platform"),)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    platform: Mapped[str] = mapped_column(String(12))  # slack | teams | discord | generic
+    url_enc: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    min_severity: Mapped[str] = mapped_column(String(12), default="high")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_success_at: Mapped[datetime | None]
+    last_error: Mapped[str | None] = mapped_column(String(500))
+
+
+class ChatDelivery(UUIDPk, Base):
+    """Durable outbox for chat-channel alert posts (per webhook), delivered by the scheduler with retries."""
+
+    __tablename__ = "chat_deliveries"
+    __table_args__ = (Index("ix_chat_deliv_status_next", "status", "next_attempt_at"),)
+    webhook_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chat_webhooks.id", ondelete="CASCADE"), index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(12), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    next_attempt_at: Mapped[datetime] = mapped_column(default=utcnow)
+    sent_at: Mapped[datetime | None]
+
+
+class ResponsePlaybook(UUIDPk, Base):
+    """Automated response (SOAR): when a security alert matches the trigger, run the listed actions
+    (isolate the endpoint, escalate to critical, add a note). One organization may have several playbooks."""
+
+    __tablename__ = "response_playbooks"
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    match_rule_keys: Mapped[list] = mapped_column(JSON, default=list)   # [] = any rule
+    match_min_severity: Mapped[str] = mapped_column(String(12), default="high")
+    match_kinds: Mapped[list] = mapped_column(JSON, default=list)       # [] = any kind
+    actions: Mapped[list] = mapped_column(JSON, default=list)           # ["isolate", "escalate", "comment"]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)

@@ -10,7 +10,7 @@ from typing import TypeVar
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
@@ -119,6 +119,43 @@ def inventory(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get
     return {"accepted": True}
 
 
+@router.post("/telemetry", status_code=202)
+def telemetry(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Stream endpoint telemetry (process creation, etc.) for the EDR detection engine. Events are evaluated against
+    the detection rules and discarded; only matches become alerts. Agent-signed like every other agent request."""
+    from app.services import detections
+    req = _parse(s.TelemetryRequest, ctx.body)
+    matched = detections.ingest(db, ctx.device, [e.model_dump() for e in req.events])
+    return {"accepted": True, "matched": matched}
+
+
+@router.post("/location", status_code=202)
+def location(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Resolve the endpoint's position from its reported Wi-Fi access points (or IP fallback). Agent-signed."""
+    from app.services import geolocation
+    req = _parse(s.LocationRequest, ctx.body)
+    geolocation.resolve_and_store(db, ctx.device, [ap.model_dump() for ap in req.wifi_access_points], ctx.ip)
+    return {"accepted": True}
+
+
+@router.post("/web-activity", status_code=202)
+def web_activity(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Store the endpoint's aggregated per-domain visit counts (no full URLs) for the fleet Top-websites view."""
+    from app.services import webactivity
+    req = _parse(s.WebActivityRequest, ctx.body)
+    webactivity.record(db, ctx.device.id, [sv.model_dump() for sv in req.sites])
+    return {"accepted": True}
+
+
+@router.post("/patch-status", status_code=202)
+def patch_status(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Store the endpoint's OS patch status (pending updates, reboot-pending, last-patched) for the fleet scorecard."""
+    from app.services import patches
+    req = _parse(s.PatchStatusRequest, ctx.body)
+    patches.record(db, ctx.device.id, req.model_dump())
+    return {"accepted": True}
+
+
 @router.post("/certificate/renew", response_model=s.RenewResponse)
 def renew(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
     req = _parse(s.RenewRequest, ctx.body)
@@ -157,3 +194,60 @@ def assist_event(session_id: uuid.UUID, ctx: AgentContext = Depends(agent_auth),
     except PolicyError as e:
         raise HTTPException(e.status, e.message)
     return {"session_id": str(sess.id), "status": sess.status}
+
+
+@router.websocket("/rdp/tunnel")
+async def rdp_tunnel_endpoint(ws: WebSocket, session: str, token: str):
+    """Endpoint side of the RDP relay: the agent dials out here and bridges its local 127.0.0.1:3389. Authorised by
+    the short-lived HMAC token handed to the device in the signed rdp.start job (not the usual signed-request auth,
+    which does not apply to a WebSocket)."""
+    from app.services.rdp_relay import hub, verify_token
+    if not verify_token(token, session, "endpoint"):
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    await hub.join(session, "endpoint", ws)
+
+
+# ------------------------------------------------------------------------------- Windows sign-in from the phone
+class UnlockStart(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: str
+    windows_user: str
+    sid: str
+    key: str | None = None
+
+
+class UnlockStatus(BaseModel):
+    model_config = {"extra": "forbid"}
+    request_id: uuid.UUID
+    secret: str
+
+
+@router.post("/unlock/start")
+def unlock_start(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    """Called by the agent on behalf of the local credential provider (lock screen)."""
+    from app.services import windows_unlock as wu
+    req = _parse(UnlockStart, ctx.body)
+    try:
+        st = wu.start(db, ctx.device, kind=req.kind, windows_user=req.windows_user, sid=req.sid, key_b64=req.key,
+                      ip=ctx.ip)
+    except wu.UnlockError as e:
+        db.rollback()
+        raise HTTPException(e.status, {"code": e.code, "message": e.message})
+    db.commit()
+    return {"request_id": str(st.request_id), "number": st.number, "secret": st.secret,
+            "expires_at": st.expires_at, "approver": st.approver}
+
+
+@router.post("/unlock/status")
+def unlock_status(ctx: AgentContext = Depends(agent_auth), db: Session = Depends(get_db)):
+    from app.services import windows_unlock as wu
+    req = _parse(UnlockStatus, ctx.body)
+    try:
+        out = wu.status(db, ctx.device, req.request_id, req.secret, ctx.ip)
+    except wu.UnlockError as e:
+        db.commit()
+        raise HTTPException(e.status, {"code": e.code, "message": e.message})
+    db.commit()
+    return out

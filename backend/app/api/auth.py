@@ -12,7 +12,6 @@ from app.api.deps import (
     AuthContext,
     client_info,
     current_context,
-    pending_mfa_context,
     rate_limit,
 )
 from app.core.config import get_settings
@@ -22,7 +21,6 @@ from app.schemas import auth as s
 from app.schemas.common import Message
 from app.services import audit, auth
 from app.services.auth import AuthError
-from app.services.email import EmailDeliveryError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -50,92 +48,54 @@ def bootstrap_status(db: Session = Depends(get_db)):
     return s.BootstrapStatus(needs_setup=auth.needs_setup(db))
 
 
-@router.post("/register", response_model=Message, status_code=201,
+@router.post("/register", response_model=s.RegisterResponse, status_code=201,
              dependencies=[Depends(rate_limit("register", 5))])
-def register(body: s.RegisterRequest, request: Request, db: Session = Depends(get_db)):
-    """Creates the first Super Admin. Closed once any user exists; further admins are invited."""
+def register(body: s.RegisterRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    """First-run setup: create the organisation and its first Super Admin with a password, and sign them in. Closed
+    once any user exists; further organisations and admins are created by a Super Admin."""
     try:
-        auth.register_first_admin(db, org_name=body.organization_name, full_name=body.full_name,
-                                  email_addr=str(body.email), password=body.password, client=client_info(request))
-    except AuthError as e:
-        _raise(e)
-    except EmailDeliveryError:
-        raise HTTPException(502, "Account created, but the verification email could not be sent.")
-    return Message(detail="Account created. Check your email to verify your address before signing in.")
-
-
-@router.post("/verify-email", response_model=Message, dependencies=[Depends(rate_limit("token", 20))])
-def verify_email(body: s.TokenRequest, request: Request, db: Session = Depends(get_db)):
-    try:
-        auth.verify_email(db, body.token, client_info(request))
-    except AuthError as e:
-        _raise(e)
-    return Message(detail="Email verified. You can now sign in.")
-
-
-@router.post("/login", response_model=s.LoginResponse)
-def login(body: s.LoginRequest, request: Request, response: Response, db: Session = Depends(get_db),
-          _rl=Depends(rate_limit("login", get_settings().login_rate_limit_per_minute))):
-    try:
-        result = auth.login(db, str(body.email), body.password, client_info(request))
+        result = auth.register_first_admin(db, org_name=body.organization_name, full_name=body.full_name,
+                                           email_addr=str(body.email), password=body.password,
+                                           client=client_info(request))
+    except auth.PasswordPolicyError as e:
+        raise HTTPException(422, str(e))
     except AuthError as e:
         _raise(e)
     _set_cookies(response, result.session_token, result.csrf_token)
-    return s.LoginResponse(mfa_required=result.mfa_required)
+    return s.RegisterResponse(detail="Organisation created. You are signed in.")
 
 
-@router.post("/mfa/verify", response_model=Message, dependencies=[Depends(rate_limit("mfa", 10))])
-def mfa_verify(body: s.MfaCode, ctx: AuthContext = Depends(pending_mfa_context), db: Session = Depends(get_db)):
+@router.post("/login", response_model=s.LoginResponse, dependencies=[Depends(rate_limit("login", 10))])
+def login(body: s.LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    """Password sign-in. On success a session cookie is set; `must_change_password` tells the client to force a
+    password change (temporary password from a Super Admin handover)."""
     try:
-        auth.verify_mfa_login(db, ctx.session, ctx.user, body.code, ctx.client)
+        result = auth.login_with_password(db, str(body.email), body.password, client_info(request))
     except AuthError as e:
         _raise(e)
-    return Message(detail="Verified")
+    _set_cookies(response, result.session_token, result.csrf_token)
+    return s.LoginResponse(must_change_password=result.must_change_password)
+
+
+@router.post("/password", response_model=Message)
+def change_password(body: s.ChangePasswordRequest, ctx: AuthContext = Depends(current_context),
+                    db: Session = Depends(get_db)):
+    """Change your own password (also used to clear a forced change after a handover). Signs out other sessions."""
+    try:
+        auth.change_password(db, ctx.user, body.current_password, body.new_password, ctx.client,
+                             keep_session_id=ctx.session.id)
+    except auth.PasswordPolicyError as e:
+        raise HTTPException(422, str(e))
+    except AuthError as e:
+        _raise(e)
+    return Message(detail="Password changed")
 
 
 @router.post("/logout", response_model=Message)
-def logout(response: Response, ctx: AuthContext = Depends(pending_mfa_context), db: Session = Depends(get_db)):
+def logout(response: Response, ctx: AuthContext = Depends(current_context), db: Session = Depends(get_db)):
     auth.logout(db, ctx.session, ctx.user, ctx.client)
     _clear_cookies(response)
     return Message(detail="Signed out")
-
-
-@router.post("/password/forgot", response_model=Message, status_code=202,
-             dependencies=[Depends(rate_limit("forgot", 5))])
-def forgot_password(body: s.ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
-    try:
-        auth.request_password_reset(db, str(body.email), client_info(request))
-    except EmailDeliveryError:
-        pass  # Do not reveal account existence via delivery errors; failure is logged server-side.
-    return Message(detail="If an account exists for that address, a reset link has been sent.")
-
-
-@router.post("/password/reset", response_model=Message, dependencies=[Depends(rate_limit("token", 20))])
-def reset_password(body: s.ResetPasswordRequest, request: Request, db: Session = Depends(get_db)):
-    try:
-        auth.reset_password(db, body.token, body.new_password, client_info(request))
-    except AuthError as e:
-        _raise(e)
-    return Message(detail="Password updated. Sign in with your new password.")
-
-
-@router.post("/invite/accept", response_model=Message, dependencies=[Depends(rate_limit("token", 20))])
-def accept_invite(body: s.AcceptInviteRequest, request: Request, db: Session = Depends(get_db)):
-    try:
-        auth.accept_invite(db, body.token, body.password, client_info(request))
-    except AuthError as e:
-        _raise(e)
-    return Message(detail="Account activated. You can now sign in.")
-
-
-@router.post("/password/change", response_model=Message)
-def change_password(body: s.ChangePasswordRequest, ctx: AuthContext = Depends(current_context),
-                    db: Session = Depends(get_db)):
-    try:
-        auth.change_password(db, ctx.user, ctx.session, body.current_password, body.new_password, ctx.client)
-    except AuthError as e:
-        _raise(e)
-    return Message(detail="Password changed. Other sessions were signed out.")
 
 
 @router.get("/me", response_model=s.MeResponse)
@@ -145,37 +105,10 @@ def me(ctx: AuthContext = Depends(current_context), db: Session = Depends(get_db
     return s.MeResponse(
         id=u.id, email=u.email, full_name=u.full_name, organization_id=u.organization_id,
         organization_name=org.name if org else "", roles=[s.RoleOut.model_validate(r) for r in u.roles],
-        permissions=sorted(ctx.permissions), mfa_enabled=u.mfa_enabled,
+        permissions=sorted(ctx.permissions),
         email_verified=u.email_verified_at is not None, last_login_at=u.last_login_at,
+        must_change_password=u.must_change_password,
     )
-
-
-@router.post("/mfa/setup", response_model=s.MfaSetupResponse)
-def mfa_setup(ctx: AuthContext = Depends(current_context), db: Session = Depends(get_db)):
-    try:
-        secret, uri = auth.begin_mfa_setup(db, ctx.user)
-    except AuthError as e:
-        _raise(e)
-    return s.MfaSetupResponse(secret=secret, otpauth_uri=uri)
-
-
-@router.post("/mfa/enable", response_model=Message)
-def mfa_enable(body: s.MfaCode, ctx: AuthContext = Depends(current_context), db: Session = Depends(get_db)):
-    try:
-        auth.confirm_mfa_setup(db, ctx.user, body.code, ctx.client)
-    except AuthError as e:
-        _raise(e)
-    return Message(detail="Multi-factor authentication enabled.")
-
-
-@router.post("/mfa/disable", response_model=Message)
-def mfa_disable(body: s.MfaDisableRequest, ctx: AuthContext = Depends(current_context),
-                db: Session = Depends(get_db)):
-    try:
-        auth.disable_mfa(db, ctx.user, body.password, body.code, ctx.client)
-    except AuthError as e:
-        _raise(e)
-    return Message(detail="Multi-factor authentication disabled.")
 
 
 @router.get("/sessions", response_model=list[s.SessionOut])

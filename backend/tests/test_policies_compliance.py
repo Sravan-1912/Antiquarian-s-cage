@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from app.security import command_signing
-from tests.conftest import bootstrap_admin, csrf, login
+from tests.conftest import bootstrap_admin, csrf, invite_and_accept, login
 from tests.test_endpoints import INVENTORY, FakeAgent, _token
 
 FW = {"name": "Baseline firewall", "category": "firewall", "configuration": {"profiles": ["domain", "private", "public"]}}
@@ -148,9 +148,7 @@ def test_category_clash_and_rbac(client, outbox):
     assert client.post(f"/api/v1/policies/{p1['id']}/retire", headers=csrf(client)).status_code == 409
 
     from tests.conftest import STRONG, last_token
-    client.post("/api/v1/users", json={"email": "sa@example.com", "full_name": "Sec Analyst", "role": "security_analyst"},
-                headers=csrf(client))
-    client.post("/api/v1/auth/invite/accept", json={"token": last_token(outbox, "/accept-invite"), "password": STRONG})
+    invite_and_accept(client, outbox, "sa@example.com", "security_analyst", full_name="Sec Analyst")
     client.post("/api/v1/auth/logout", headers=csrf(client))
     login(client, "sa@example.com")
     assert client.get("/api/v1/policies").status_code == 200

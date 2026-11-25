@@ -11,7 +11,7 @@ import { formatDateTime, relativeTime } from '@/utils/format'
 
 export interface App {
   id: string; name: string; description: string; protocol: string; client_id: string; client_type: 'confidential' | 'public'
-  redirect_uris: string[]; launch_url: string | null; mfa_required: boolean; status: 'active' | 'disabled'
+  redirect_uris: string[]; launch_url: string | null; mfa_required: boolean; require_compliant_device: boolean; max_risk_level: string; status: 'active' | 'disabled'
   verified_at: string | null; created_at: string; assigned_employees: number; integration: string; client_secret?: string
 }
 
@@ -51,11 +51,12 @@ export function ApplicationsPage() {
   const qc = useQueryClient()
   const list = useQuery({ queryKey: ['applications'], queryFn: () => api.get<App[]>('/applications') })
   const [open, setOpen] = useState(false)
-  const [f, setF] = useState({ name: '', description: '', client_type: 'confidential', redirect: '', launch_url: '', mfa_required: false })
+  const [f, setF] = useState({ name: '', description: '', client_type: 'confidential', redirect: '', launch_url: '', mfa_required: false, require_compliant_device: false, max_risk_level: 'any' })
   const [created, setCreated] = useState<App | null>(null)
   const create = useMutation({
     mutationFn: () => api.post<App>('/applications', {
       name: f.name, description: f.description, client_type: f.client_type, mfa_required: f.mfa_required,
+      require_compliant_device: f.require_compliant_device, max_risk_level: f.max_risk_level,
       redirect_uris: f.redirect.split('\n').map((x) => x.trim()).filter(Boolean), launch_url: f.launch_url.trim() || null,
     }),
     onSuccess: (a) => { qc.invalidateQueries({ queryKey: ['applications'] }); setCreated(a) },
@@ -120,6 +121,13 @@ export function ApplicationsPage() {
             <Field label="Launch URL (shown in employee workspace)" htmlFor="al"><Input id="al" value={f.launch_url} onChange={(e) => setF({ ...f, launch_url: e.target.value })} /></Field>
             <label className="flex items-center gap-2 text-sm text-silver-200"><input type="checkbox" className="size-4 accent-emerald-500" checked={f.mfa_required} onChange={(e) => setF({ ...f, mfa_required: e.target.checked })} />
               Require multi-factor sign-in (passkey or password + authenticator code)</label>
+            <label className="flex items-center gap-2 text-sm text-silver-200"><input type="checkbox" className="size-4 accent-emerald-500" checked={f.require_compliant_device} onChange={(e) => setF({ ...f, require_compliant_device: e.target.checked })} />
+              Require a compliant managed endpoint (device trust)</label>
+            <Field label="Maximum endpoint risk allowed" htmlFor="arisk">
+              <Select id="arisk" className="w-full" value={f.max_risk_level} onChange={(e) => setF({ ...f, max_risk_level: e.target.value })}>
+                <option value="any">Any (don't gate on risk)</option><option value="low">Low only</option><option value="medium">Low–Medium</option><option value="high">Up to High</option>
+              </Select>
+            </Field>
             <div className="flex justify-end"><Button type="submit" loading={create.isPending}>Register</Button></div>
           </form>
         )}
@@ -179,6 +187,19 @@ export function ApplicationDetailPage() {
             <Copyable label="Issuer" value={ISSUER} />
             <div><div className="mb-1 text-xs text-silver-500">Redirect URIs</div>{a.redirect_uris.map((u) => <code key={u} className="block font-mono text-xs text-silver-200">{u}</code>)}</div>
             <div className="text-xs text-silver-500">Scopes: openid profile email · PKCE S256 required · ID token RS256 (5 min) · MFA {a.mfa_required ? 'required' : 'optional'}</div>
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Device trust (posture)" description="Gate sign-in on the user's endpoint posture — evaluated over their active managed endpoints." />
+          <div className="space-y-3 p-4">
+            <label className="flex items-center justify-between gap-2 text-sm text-silver-200">Require a compliant endpoint
+              <input type="checkbox" disabled={!manage} className="size-4 accent-emerald-500" checked={a.require_compliant_device} onChange={(e) => toggle.mutate({ require_compliant_device: e.target.checked })} /></label>
+            <Field label="Maximum endpoint risk allowed" htmlFor="drisk">
+              <Select id="drisk" className="w-full" disabled={!manage} value={a.max_risk_level} onChange={(e) => toggle.mutate({ max_risk_level: e.target.value })}>
+                <option value="any">Any (don't gate on risk)</option><option value="low">Low only</option><option value="medium">Low–Medium</option><option value="high">Up to High</option>
+              </Select>
+            </Field>
+            <p className="text-xs text-silver-500">When set, OIDC authorization is denied unless the user has a managed endpoint meeting the requirement{a.require_compliant_device || a.max_risk_level !== 'any' ? '' : ' (currently off — access is not gated on device posture)'}.</p>
           </div>
         </Card>
         <Card>

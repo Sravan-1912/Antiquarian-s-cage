@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as DM from '@radix-ui/react-dropdown-menu'
 import {
-  AppWindow, Bell, Briefcase, FileBarChart, ShieldAlert, ChevronDown, ClipboardCheck, FileLock2, Headset, LaptopMinimal, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck, UserCog, Users, X,
+  AppWindow, Bell, Boxes, Briefcase, FileBarChart, FileCode2, ShieldAlert, ChevronDown, ClipboardCheck, FileLock2, Globe2, Headset, LaptopMinimal, LayoutDashboard, LogOut, Menu, Palette, ScrollText, Search, ShieldCheck, UserCog, Users, X,
 } from 'lucide-react'
 import { Wordmark } from '@/components/Logo'
 import { Badge, Spinner } from '@/components/ui/primitives'
@@ -28,6 +28,9 @@ const NAV: { section: string; items: NavItem[] }[] = [
     items: [
       { to: '/endpoints', label: 'Endpoints', icon: LaptopMinimal, anyPerm: ['devices:read', 'devices:read_assigned'] },
       { to: '/remote-sessions', label: 'Remote sessions', icon: Headset, anyPerm: ['devices:read', 'devices:read_assigned'] },
+      { to: '/groups', label: 'Groups', icon: Boxes, perm: 'devices:manage' },
+      { to: '/scripts', label: 'Scripts', icon: FileCode2, perm: 'devices:shell' },
+      { to: '/insights', label: 'Web & locations', icon: Globe2, anyPerm: ['devices:read', 'devices:read_assigned'] },
     ],
   },
   {
@@ -48,7 +51,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
       { to: '/reports', label: 'Reports', icon: FileBarChart, perm: 'reports:read' },
     ],
   },
-  { section: 'Account', items: [{ to: '/account/security', label: 'Security settings', icon: ShieldCheck }] },
+  { section: 'Account', items: [{ to: '/account/security', label: 'Security settings', icon: ShieldCheck }, { to: '/themes', label: 'Themes', icon: Palette }] },
 ]
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -206,7 +209,6 @@ function ProfileMenu() {
         <DM.Content align="end" sideOffset={6} className="z-40 w-60 rounded-lg border border-ink-600 bg-ink-900 p-1 shadow-2xl shadow-black/50">
           <div className="px-2.5 py-2">
             <div className="truncate text-sm text-silver-100">{me.email}</div>
-            <div className="mt-1 flex gap-1">{me.mfa_enabled ? <Badge tone="success">MFA on</Badge> : <Badge tone="warning">MFA off</Badge>}</div>
           </div>
           <DM.Separator className="my-1 h-px bg-ink-700" />
           <DM.Item onSelect={() => nav('/account/security')} className="flex cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-sm text-silver-200 outline-none data-[highlighted]:bg-ink-800">
@@ -223,7 +225,6 @@ function ProfileMenu() {
 
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
-  const { me } = useAuth()
   return (
     <div className="flex h-full">
       <aside className="hidden w-60 shrink-0 border-r border-ink-800 bg-ink-950 lg:block"><Sidebar /></aside>
@@ -241,16 +242,12 @@ export function AppShell() {
           <button className="rounded p-1.5 text-silver-400 hover:bg-ink-800 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu className="size-5" /></button>
           <GlobalSearch />
           <div className="ml-auto flex items-center gap-1">
+            <Link to="/themes" className="rounded-md p-1.5 text-silver-400 hover:bg-ink-800 hover:text-silver-100" aria-label="Themes" title="Themes"><Palette className="size-4" /></Link>
             <NotificationCenter />
             <div className="mx-1 h-6 w-px bg-ink-700" />
             <ProfileMenu />
           </div>
         </header>
-        {me && !me.mfa_enabled && (
-          <div className="border-b border-amber-500/20 bg-amber-500/5 px-4 py-1.5 text-xs text-amber-200">
-            Multi-factor authentication is not enabled on your account. <Link to="/account/security" className="underline underline-offset-2 hover:text-amber-100">Enable it now</Link>.
-          </div>
-        )}
         <main className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6"><div className="mx-auto max-w-[1400px]"><Outlet /></div></main>
       </div>
     </div>

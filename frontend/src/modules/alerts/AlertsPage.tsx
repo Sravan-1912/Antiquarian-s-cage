@@ -5,6 +5,8 @@ import { ArrowLeft, ShieldAlert } from 'lucide-react'
 import { Alert, Badge, Button, Card, CardHeader, EmptyState, Field, Input, PageHeader, Pagination, Select, Spinner, Table, Td, Th } from '@/components/ui/primitives'
 import { useAuth } from '@/hooks/useAuth'
 import { api, describeError, qs } from '@/services/api'
+import { ChatChannelsCard } from './ChatChannelsCard'
+import { PlaybooksCard } from './PlaybooksCard'
 import { formatDateTime, relativeTime } from '@/utils/format'
 
 export type Sev = 'critical' | 'high' | 'medium' | 'low' | 'informational'
@@ -32,9 +34,11 @@ export function AlertsPage() {
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setF({ ...f, [k]: e.target.value }); setPage(1) }
   const list = useQuery({ queryKey: ['alerts', f, page], queryFn: () => api.get<{ items: SecAlert[]; total: number }>(`/alerts${qs({ ...f, page, page_size: 50 })}`),
     placeholderData: keepPreviousData, refetchInterval: 30_000 })
+  const { can } = useAuth()
   return (
     <div className="animate-fade-in space-y-4">
       <PageHeader title="Security alerts" description="Leads for investigation. Configuration findings and operational issues are not evidence of an attack; suspicious-activity alerts need an analyst's judgement." />
+      {can('org:settings') && <div className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0"><PlaybooksCard /><ChatChannelsCard /></div>}
       <Card>
         <div className="flex flex-wrap gap-2 border-b border-ink-700 p-3">
           <Input placeholder="Search titles…" className="max-w-xs" value={f.q} onChange={set('q')} aria-label="Search alerts" />

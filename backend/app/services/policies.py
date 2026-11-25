@@ -27,7 +27,12 @@ COMMAND_TTL_MINUTES: dict[str, int | None] = {
     "policy.apply": None, "policy.remove": None,           # None → COMMAND_JOB_TTL_HOURS
     "device.inspect": 10, "device.lock": 10, "device.restart": 30, "device.restart_cancel": 30,
     "account.disable": 60, "account.enable": 60, "account.remove_admin": 60,
+    "device.isolate": 30, "device.release": 30,
     "assist.start": 10, "assist.end": 30,
+    "rdp.start": 10, "rdp.end": 30,
+    "shell.start": 10, "shell.end": 30,
+    "screen.start": 10, "screen.end": 30,  # remote screen control over the relay
+    "script.run": 60,  # scripts library deployment: run a saved script on an endpoint and report its output
 }
 COMMANDS = set(COMMAND_TTL_MINUTES)
 
@@ -41,12 +46,13 @@ class PolicyError(Exception):
 
 # --------------------------------------------------------------------------------------------- policies
 def create_policy(db: Session, org_id: uuid.UUID, actor: Actor, *, name: str, description: str, category: str,
-                  configuration: dict) -> EndpointPolicy:
+                  configuration: dict, owner_admin_id: uuid.UUID | None = None) -> EndpointPolicy:
     cfg = validate_config(category, configuration)
     if db.scalar(select(EndpointPolicy.id).where(EndpointPolicy.organization_id == org_id, EndpointPolicy.name == name)):
         raise PolicyError("A policy with this name already exists", 409)
     p = EndpointPolicy(organization_id=org_id, name=name, description=description, category=category,
-                       configuration=cfg, version=1, status="active", created_by=actor.user_id)
+                       configuration=cfg, version=1, status="active", created_by=actor.user_id,
+                       owner_admin_id=owner_admin_id)
     db.add(p)
     db.flush()
     db.add(PolicyRevision(policy_id=p.id, version=1, configuration=cfg, changed_by=actor.user_id))

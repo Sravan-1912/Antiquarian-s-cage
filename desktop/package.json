@@ -1,0 +1,59 @@
+{
+  "name": "antiquarians-cage-desktop",
+  "productName": "Antiquarian's Cage",
+  "version": "1.0.0",
+  "description": "Antiquarian's Cage — endpoint management console, as an installable desktop app.",
+  "author": "Antiquarian's Cage",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.antiquarians-cage.console",
+    "productName": "Antiquarian's Cage",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "node_modules/ws/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/cage-backend",
+        "to": "cage-backend"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Antiquarian's Cage"
+    }
+  }
+}

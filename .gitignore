@@ -13,5 +13,17 @@ infrastructure/nginx/certs/*
 agent/var/
 agent/build/
 agent/dist/
+backend/build/
+backend/dist/
+desktop/node_modules/
+desktop/release/
 frontend/test-results/
 frontend/playwright-report/
+frontend/.e2e-state/
+mobile/credentials/
+mobile/node_modules/
+mobile/android/app/build/
+mobile/android/build/
+mobile/android/.gradle/
+endpoint-test/bundle/
+endpoint-test/*.zip

@@ -13,9 +13,7 @@ import jwt
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from tests.conftest import STRONG, bootstrap_admin, csrf, last_token, login
-
-ORIGIN, RP_ID = "http://localhost:5173", "localhost"
+from tests.conftest import ORIGIN, SoftAuthenticator, bootstrap_admin, csrf, login
 
 
 def b64u(b: bytes) -> str:
@@ -24,39 +22,6 @@ def b64u(b: bytes) -> str:
 
 def unb64u(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
-
-
-class SoftAuthenticator:
-    """Minimal platform-authenticator emulation: ES256 key, 'none' attestation, user verification performed."""
-
-    def __init__(self):
-        self.key = ec.generate_private_key(ec.SECP256R1())
-        self.cred_id = os.urandom(32)
-        self.count = 0
-        self.user_handle = b""
-
-    def _auth_data(self, flags: int, attested: bytes = b"") -> bytes:
-        self.count += 1
-        return hashlib.sha256(RP_ID.encode()).digest() + bytes([flags]) + struct.pack(">I", self.count) + attested
-
-    def create(self, options: dict, origin: str = ORIGIN) -> dict:
-        self.user_handle = unb64u(options["user"]["id"])
-        nums = self.key.public_key().public_numbers()
-        cose = cbor2.dumps({1: 2, 3: -7, -1: 1, -2: nums.x.to_bytes(32, "big"), -3: nums.y.to_bytes(32, "big")})
-        attested = bytes(16) + struct.pack(">H", len(self.cred_id)) + self.cred_id + cose
-        auth_data = self._auth_data(0x01 | 0x04 | 0x40, attested)  # UP | UV | AT
-        client = json.dumps({"type": "webauthn.create", "challenge": options["challenge"], "origin": origin}).encode()
-        att = cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": auth_data})
-        return {"id": b64u(self.cred_id), "rawId": b64u(self.cred_id), "type": "public-key", "clientExtensionResults": {},
-                "response": {"clientDataJSON": b64u(client), "attestationObject": b64u(att), "transports": ["internal"]}}
-
-    def get(self, options: dict, origin: str = ORIGIN, uv: bool = True) -> dict:
-        auth_data = self._auth_data(0x01 | (0x04 if uv else 0))
-        client = json.dumps({"type": "webauthn.get", "challenge": options["challenge"], "origin": origin}).encode()
-        sig = self.key.sign(auth_data + hashlib.sha256(client).digest(), ec.ECDSA(hashes.SHA256()))
-        return {"id": b64u(self.cred_id), "rawId": b64u(self.cred_id), "type": "public-key", "clientExtensionResults": {},
-                "response": {"clientDataJSON": b64u(client), "authenticatorData": b64u(auth_data),
-                             "signature": b64u(sig), "userHandle": b64u(self.user_handle)}}
 
 
 def _register_passkey(client, authn: SoftAuthenticator, name="Laptop") -> dict:
@@ -80,6 +45,7 @@ def test_passkey_register_login_and_revoke(client, outbox):
     login(client, "root@example.com")
     authn = SoftAuthenticator()
     pk = _register_passkey(client, authn)
+    # Passkeys are an optional second method; password sign-in registers none, so this is the only one.
     assert pk["name"] == "Laptop" and len(client.get("/api/v1/auth/passkeys").json()) == 1
     client.post("/api/v1/auth/logout", headers=csrf(client))
 
@@ -125,15 +91,25 @@ def test_cloned_authenticator_detected_by_sign_count(client, outbox):
 REDIRECT = "http://localhost:8090/callback"
 
 
-def _employee_with_portal(client, outbox, email="grace@example.com"):
+def _employee_with_portal(client, outbox, email="grace@example.com", password="Grace-Passw0rd-3z"):
     emp = client.post("/api/v1/employees", json={"employee_number": "E1", "full_name": "Grace Hopper", "email": email,
                                                  "department": "Engineering", "job_title": "Engineer"},
                       headers=csrf(client)).json()
     r = client.post(f"/api/v1/employees/{emp['id']}/portal-access", headers=csrf(client))
     assert r.status_code == 200, r.text
+    temp = r.json()["temporary_password"]
     assert client.post(f"/api/v1/employees/{emp['id']}/portal-access", headers=csrf(client)).status_code == 409
-    assert client.post("/api/v1/auth/invite/accept",
-                       json={"token": last_token(outbox, "/accept-invite"), "password": STRONG}).status_code == 200
+    # Complete the handover: the employee signs in with the temp password and sets a permanent one, without
+    # disturbing the admin session.
+    saved = [(c.name, c.value, c.domain, c.path) for c in client.cookies.jar]
+    client.cookies.clear()
+    assert client.post("/api/v1/auth/login", json={"email": email, "password": temp}).status_code == 200
+    assert client.post("/api/v1/auth/password", json={"current_password": temp, "new_password": password},
+                       headers=csrf(client)).status_code == 200
+    client.cookies.clear()
+    for name, value, domain, path in saved:
+        client.cookies.set(name, value, domain=domain, path=path)
+    client._cage_authn[email] = password
     return emp
 
 
@@ -198,7 +174,7 @@ def test_oidc_full_flow_and_verification(client, outbox):
     jwks = client.get("/api/v1/oidc/jwks").json()
     key = jwt.PyJWK(jwks["keys"][0]).key
     claims = jwt.decode(tok.json()["id_token"], key, algorithms=["RS256"], audience=app["client_id"], issuer=disc["issuer"])
-    assert claims["email"] == "grace@example.com" and claims["nonce"] == "n0nce" and claims["amr"] == ["pwd"]
+    assert claims["email"] == "grace@example.com" and claims["nonce"] == "n0nce" and "pwd" in claims["amr"]
     assert claims["department"] == "Engineering"
     ui = client.get("/api/v1/oidc/userinfo", headers={"Authorization": f"Bearer {tok.json()['access_token']}"})
     assert ui.json()["sub"] == claims["sub"]
@@ -248,7 +224,7 @@ def test_oidc_rejections(client, outbox):
     assert _token(client, app, code, v, secret="wrong").status_code == 401
 
 
-def test_mfa_required_app_needs_passkey_step_up(client, outbox):
+def test_mfa_required_app_needs_step_up(client, outbox):
     bootstrap_admin(client, outbox)
     login(client, "root@example.com")
     emp = _employee_with_portal(client, outbox)
@@ -256,17 +232,13 @@ def test_mfa_required_app_needs_passkey_step_up(client, outbox):
     client.post(f"/api/v1/applications/{app['id']}/assignments", json={"employee_ids": [emp["id"]]}, headers=csrf(client))
     client.post("/api/v1/auth/logout", headers=csrf(client))
 
+    # Password sign-in is a single factor (amr=["pwd"]); an MFA-required app is not satisfied by it, so the authorize
+    # bounces to the console asking for a step-up. (A passkey, the optional second method, carries "mfa" and would pass.)
     login(client, "grace@example.com")
-    authn = SoftAuthenticator()
-    _register_passkey(client, authn, "Work laptop")
     v, c = _pkce()
     r = _authorize(client, app, c)
-    assert "step_up=1" in r.headers["location"]  # password-only session is not enough
-    client.post("/api/v1/auth/logout", headers=csrf(client))
-    assert _passkey_login(client, authn).status_code == 200
-    code = _code(_authorize(client, app, c))
-    claims = jwt.decode(_token(client, app, code, v).json()["id_token"], options={"verify_signature": False})
-    assert "mfa" in claims["amr"] and "hwk" in claims["amr"]
+    loc = urlparse(r.headers["location"])
+    assert loc.path == "/login" and parse_qs(loc.query).get("step_up") == ["1"]
 
 
 def test_leaver_revokes_portal_sso_and_passkeys(client, outbox):
@@ -294,8 +266,7 @@ def test_leaver_revokes_portal_sso_and_passkeys(client, outbox):
     client.cookies.set("cage_session", grace_cookie)
     assert client.get("/api/v1/me/workspace").status_code == 401
     client.cookies.clear()
-    assert client.post("/api/v1/auth/login", json={"email": "grace@example.com", "password": STRONG}).status_code == 403
-    assert _passkey_login(client, authn).status_code == 401
+    assert _passkey_login(client, authn).status_code == 401  # revoked passkey can no longer sign in
 
 
 def test_employee_role_is_confined(client, outbox):

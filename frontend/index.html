@@ -2,10 +2,29 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Antiquarian's Cage</title>
+    <script>
+      // Apply the saved theme + wallpaper before first paint (zero flash).
+      (function () {
+        try {
+          var root = document.documentElement, s = root.style;
+          var t = localStorage.getItem('cage-theme') || 'liquid-glass';
+          root.dataset.theme = t;
+          var wp = JSON.parse(localStorage.getItem('cage-wallpaper-cfg') || '{}');
+          if (wp.blur != null) s.setProperty('--cage-glass-blur', wp.blur + 'px');
+          if (wp.bgBlur != null) s.setProperty('--cage-wallpaper-blur', wp.bgBlur + 'px');
+          if (wp.tint != null) s.setProperty('--cage-glass-tint', 'rgba(18,19,22,' + wp.tint + ')');
+          if (wp.dim != null) s.setProperty('--cage-wallpaper-dim', String(wp.dim));
+          if (wp.saturation != null) s.setProperty('--cage-glass-sat', wp.saturation + '%');
+          if (wp.hasImage && t === 'custom-wallpaper') root.dataset.wallpaperActive = '1';
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

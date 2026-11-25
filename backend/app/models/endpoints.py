@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import utcnow
@@ -20,6 +20,7 @@ class Device(UUIDPk, Timestamps, Base):
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"))
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)  # admin isolation
     employee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), index=True)
     support_owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     display_name: Mapped[str] = mapped_column(String(128))
@@ -46,12 +47,13 @@ class Device(UUIDPk, Timestamps, Base):
 class EnrollmentToken(UUIDPk, Base):
     __tablename__ = "enrollment_tokens"
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    owner_admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)  # admin isolation
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     label: Mapped[str] = mapped_column(String(128))
     employee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    expires_at: Mapped[datetime]
+    expires_at: Mapped[datetime | None]  # None = indefinite (never expires)
     used_at: Mapped[datetime | None]
     used_by_device_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"))
     revoked_at: Mapped[datetime | None]
@@ -92,6 +94,8 @@ class DeviceHeartbeat(Base):
     source_ip: Mapped[str | None] = mapped_column(String(64))
     agent_version: Mapped[str | None] = mapped_column(String(32))
     uptime_seconds: Mapped[int | None] = mapped_column(BigInteger)
+    net_bytes_sent: Mapped[int | None] = mapped_column(BigInteger)
+    net_bytes_recv: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class DeviceInventory(UUIDPk, Base):
@@ -117,6 +121,52 @@ class DeviceEvent(UUIDPk, Base):
     details: Mapped[dict] = mapped_column(default=dict)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class DeviceLocation(UUIDPk, Base):
+    """Latest resolved geolocation for a device (one row per device). `source` records how it was obtained and
+    `accuracy_m` the radius, so a position is never presented as more precise than it is. Wi-Fi/IP derived — approximate."""
+
+    __tablename__ = "device_locations"
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True, index=True)
+    source: Mapped[str] = mapped_column(String(8), default="none")  # wifi | ip | none
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
+    accuracy_m: Mapped[int | None] = mapped_column(Integer)  # radius in metres
+    city: Mapped[str | None] = mapped_column(String(128))
+    region: Mapped[str | None] = mapped_column(String(128))
+    country: Mapped[str | None] = mapped_column(String(64))
+    ip: Mapped[str | None] = mapped_column(String(64))
+    ap_count: Mapped[int] = mapped_column(Integer, default=0)  # Wi-Fi access points used
+    resolved_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class DevicePatchStatus(UUIDPk, Base):
+    """Latest OS patch status for a device (one row per device): pending updates by severity, reboot-pending flag and
+    when it was last patched. Reported by the agent on the inventory cadence."""
+
+    __tablename__ = "device_patch_status"
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True, index=True)
+    pending_total: Mapped[int | None] = mapped_column(Integer)
+    pending_critical: Mapped[int | None] = mapped_column(Integer)
+    pending_important: Mapped[int | None] = mapped_column(Integer)
+    reboot_pending: Mapped[bool] = mapped_column(default=False)
+    last_patched: Mapped[str | None] = mapped_column(String(64))  # agent-reported date string (informational)
+    checked_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class DeviceSiteVisit(UUIDPk, Base):
+    """Aggregated per-domain visit counts reported by the agent (no full URLs). One row per (device, domain)."""
+
+    __tablename__ = "device_site_visits"
+    __table_args__ = (
+        UniqueConstraint("device_id", "domain", name="uq_site_visit_device_domain"),
+        Index("ix_site_visits_device", "device_id"),
+    )
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
+    domain: Mapped[str] = mapped_column(String(255))
+    visits: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class AgentVersion(UUIDPk, Base):
