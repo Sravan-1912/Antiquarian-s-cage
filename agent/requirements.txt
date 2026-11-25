@@ -3,3 +3,5 @@ cryptography==50.0.2
 psutil
 websockets==15.0.1
 pywin32; sys_platform == "win32"
+mss==10.0.0
+Pillow==11.3.0

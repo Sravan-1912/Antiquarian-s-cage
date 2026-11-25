@@ -350,7 +350,7 @@ export interface RemoteSession {
   device_name: string | null
   requested_by_label: string
   reason: string
-  mode: 'assist' | 'rdp' | 'shell'
+  mode: 'assist' | 'rdp' | 'shell' | 'screen'
   connection: string | null
   require_consent: boolean
   max_minutes: number

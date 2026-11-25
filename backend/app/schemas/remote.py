@@ -102,6 +102,13 @@ class ShellRequest(BaseModel):
     elevated: bool = False
 
 
+class ScreenRequest(BaseModel):
+    """Start an unattended remote-screen session: the agent captures the screen and injects input over the relay (works
+    on any Windows edition, incl. Home). No consent/step-up, but the endpoint always shows a visible banner."""
+    reason: str = Field(min_length=5, max_length=500)
+    max_minutes: int = Field(default=30, ge=5, le=120)
+
+
 class TerminateRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 

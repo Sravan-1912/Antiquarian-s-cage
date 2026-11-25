@@ -135,6 +135,45 @@ def request_rdp_session(db: Session, device: Device, reason: str, max_minutes: i
     return s
 
 
+def request_screen_session(db: Session, device: Device, reason: str, max_minutes: int, actor: Actor) -> RemoteSession:
+    """Start an UNATTENDED remote-screen session: the agent captures the screen and injects input over the relay — works
+    on any Windows edition (no RDP host needed). No consent/step-up, but the endpoint always shows a visible banner."""
+    if device.status != "active":
+        raise PolicyError(f"Endpoint is {device.status}", 409)
+    if devices.connectivity(device) != "online":
+        raise PolicyError("Endpoint is offline; remote screen needs a connected endpoint", 409)
+    cfg = assist_settings(db, device.organization_id)
+    if max_minutes > cfg.max_session_minutes:
+        raise PolicyError(f"Sessions are limited to {cfg.max_session_minutes} minutes by organisation policy", 422)
+    live = db.scalar(select(RemoteSession).where(RemoteSession.device_id == device.id,
+                                                 RemoteSession.status.in_(("requested", "awaiting_consent", "active", "ending"))))
+    if live:
+        refresh(db, live)
+        if live.status not in TERMINAL:
+            raise PolicyError("A remote session is already open for this endpoint", 409)
+    s = RemoteSession(id=uuid.uuid4(), organization_id=device.organization_id, device_id=device.id,
+                      requested_by=actor.user_id, requested_by_label=actor.label, reason=reason, mode="screen",
+                      require_consent=False, max_minutes=max_minutes, status="requested")
+    db.add(s)
+    db.flush()
+    from app.services.rdp_relay import mint_token
+    job = policies.create_job(db, device, "screen.start", {
+        "session_id": str(s.id), "requested_by": actor.label, "reason": reason, "max_minutes": max_minutes,
+        "tunnel_token": mint_token(str(s.id), "endpoint", ttl_seconds=max_minutes * 60 + 600),
+    }, actor, idempotency_key=f"screen:{s.id}:start")
+    s.start_job_id = job.id
+    audit.record(db, device.organization_id, actor, "remote.screen_requested", target_type="device",
+                 target_id=device.id, target_label=device.hostname,
+                 metadata={"session_id": str(s.id), "reason": reason, "max_minutes": max_minutes})
+    notifications.notify_users(
+        db, device.organization_id, notifications.users_with_permission(db, device.organization_id, "devices:manage"),
+        kind="remote.screen_requested", severity="medium",
+        title=f"Remote screen started: {device.hostname}", body=f"{actor.label}: {reason}",
+        link=f"/endpoints/{device.id}")
+    db.commit()
+    return s
+
+
 def request_shell_session(db: Session, device: Device, reason: str, max_minutes: int, elevated: bool,
                           actor: Actor) -> RemoteSession:
     """Open an interactive live-response shell (arbitrary command execution — break-glass). RBAC is enforced by the
@@ -178,7 +217,7 @@ def request_shell_session(db: Session, device: Device, reason: str, max_minutes:
 
 
 def _end_command(s: RemoteSession) -> str:
-    return {"rdp": "rdp.end", "shell": "shell.end"}.get(s.mode, "assist.end")
+    return {"rdp": "rdp.end", "shell": "shell.end", "screen": "screen.end"}.get(s.mode, "assist.end")
 
 
 def terminate(db: Session, s: RemoteSession, reason: str, actor: Actor) -> RemoteSession:
@@ -264,11 +303,11 @@ def on_job_result(db: Session, device: Device, job: CommandJob, status: str, det
                      metadata={"session_id": str(s.id), "consent": decision, "consent_user": s.consent_user,
                                "detail": (detail or "")[:300]})
         return
-    if job.command in ("rdp.start", "shell.start"):
+    if job.command in ("rdp.start", "shell.start", "screen.start"):
         s = db.get(RemoteSession, uuid.UUID(job.parameters["session_id"]))
         if s is None or s.device_id != device.id or s.status in TERMINAL:
             return
-        kind = "rdp" if job.command == "rdp.start" else "shell"
+        kind = {"rdp.start": "rdp", "shell.start": "shell", "screen.start": "screen"}[job.command]
         if status == "succeeded":
             now = utcnow()
             s.status, s.started_at = "active", now
@@ -278,14 +317,14 @@ def on_job_result(db: Session, device: Device, job: CommandJob, status: str, det
                 s.connection = str(state.get("connection") or "")[:128] or None
             action = f"remote.{kind}_started"
         else:
-            label = "remote desktop" if kind == "rdp" else "live-response shell"
+            label = {"rdp": "remote desktop", "shell": "live-response shell", "screen": "remote screen"}[kind]
             _close(s, "failed", "system", detail or f"Endpoint could not start the {label} session")
             action = f"remote.{kind}_failed"
         audit.record(db, device.organization_id, actor, action, target_type="device", target_id=device.id,
                      target_label=device.hostname, result="success" if s.status == "active" else "failure",
                      metadata={"session_id": str(s.id), "connection": s.connection, "detail": (detail or "")[:300]})
         return
-    if job.command in ("assist.end", "rdp.end", "shell.end"):
+    if job.command in ("assist.end", "rdp.end", "shell.end", "screen.end"):
         s = db.get(RemoteSession, uuid.UUID(job.parameters["session_id"]))
         if s is None:
             return

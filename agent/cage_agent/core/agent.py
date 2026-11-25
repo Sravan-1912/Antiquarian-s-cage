@@ -250,6 +250,8 @@ class Agent:
                 self.executor.assist.end_all()  # never leave an indicator/Quick Assist running unattended
             if self.executor.shell is not None:
                 self.executor.shell.end_all()   # never leave a live-response shell + banner running unattended
+            if self.executor.screen is not None:
+                self.executor.screen.end_all()  # never leave a remote-screen stream + banner running unattended
             self.client.close()
             log.info("agent stopped")
         return 0

@@ -37,6 +37,7 @@ class JobExecutor:
         self.assist = None
         self.rdp = None
         self.shell = None
+        self.screen = None
 
     # ------------------------------------------------------------------ key pinning
     def pinned_key(self, offered: dict | None) -> PinnedKey:
@@ -103,6 +104,10 @@ class JobExecutor:
                     self._shell(report).start(env) if command == "shell.start" else self._shell(report).end(env)
                     handled += 1
                     continue  # the shell manager reports asynchronously
+                if command.startswith("screen."):
+                    self._screen(report).start(env) if command == "screen.start" else self._screen(report).end(env)
+                    handled += 1
+                    continue  # the screen manager reports asynchronously
                 if command.startswith("policy.") and sys.platform.startswith("linux"):
                     result = self._run_policy_linux(command, env["parameters"])
                 elif self._runs_locally(command):
@@ -218,3 +223,15 @@ class JobExecutor:
                                       ca_bundle=getattr(self.cfg, "ca_bundle", None),
                                       device_sign=getattr(self, "device_sign", None))
         return self.shell
+
+    def _screen(self, report: Callable[[str, dict], None]):
+        if self.screen is None:
+            from cage_agent.remote.screen import ScreenManager
+
+            def rep(job_id: str, result: dict) -> None:
+                self._finish(job_id, result, report)
+
+            self.screen = ScreenManager(rep, self.session_event or (lambda *a: None),
+                                        server_url=getattr(self.cfg, "server_url", ""),
+                                        ca_bundle=getattr(self.cfg, "ca_bundle", None))
+        return self.screen

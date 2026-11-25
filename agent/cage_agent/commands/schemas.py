@@ -16,6 +16,7 @@ ROUTE = {
     "assist.start": "agent", "assist.end": "agent",
     "rdp.start": "agent", "rdp.end": "agent",
     "shell.start": "agent", "shell.end": "agent",
+    "screen.start": "agent", "screen.end": "agent",  # remote screen control (capture + input inject over the relay)
     "script.run": "agent",  # scripts library: run a saved script in the agent's context, report its output
 }
 ALLOWED_COMMANDS = set(ROUTE)
@@ -90,6 +91,16 @@ def validate_command_params(command: str, p) -> dict:
         if not isinstance(p.get("elevated", False), bool):
             raise ValueError("elevated must be a boolean")
     elif command == "shell.end":
+        _keys(p, {"session_id"})
+        uuid.UUID(_str(p, "session_id", 36))
+    elif command == "screen.start":
+        _keys(p, {"session_id", "max_minutes", "tunnel_token"})
+        uuid.UUID(_str(p, "session_id", 36))
+        m = p.get("max_minutes")
+        if not isinstance(m, int) or not 5 <= m <= 120:
+            raise ValueError("max_minutes must be 5..120")
+        _str(p, "tunnel_token", 256)
+    elif command == "screen.end":
         _keys(p, {"session_id"})
         uuid.UUID(_str(p, "session_id", 36))
     elif command == "script.run":

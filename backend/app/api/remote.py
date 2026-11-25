@@ -150,6 +150,38 @@ def request_shell(device_id: uuid.UUID, body: s.ShellRequest, ctx: AuthContext =
     return _session_out(db, sess)
 
 
+@router.post("/devices/{device_id}/screen", response_model=s.SessionOut, status_code=201,
+             dependencies=[Depends(rate_limit("remote-screen", 10))])
+def request_screen(device_id: uuid.UUID, body: s.ScreenRequest, ctx: AuthContext = Depends(REMOTE),
+                   db: Session = Depends(get_db)):
+    """Start an unattended remote-screen session (agent captures the screen + injects input over the relay; works on
+    any Windows edition incl. Home). RBAC (devices:remote) + admin isolation apply; the endpoint shows a visible banner."""
+    device = get_device(db, ctx, device_id)
+    try:
+        sess = remote.request_screen_session(db, device, body.reason.strip(), body.max_minutes, ctx.actor)
+    except PolicyError as e:
+        _raise(e)
+    return _session_out(db, sess)
+
+
+@router.post("/remote-sessions/{session_id}/screen-connect")
+def screen_connect(session_id: uuid.UUID, ctx: AuthContext = Depends(REMOTE), db: Session = Depends(get_db)):
+    """Mint a short-lived operator token so the console's screen viewer can attach over the relay (same byte relay as
+    RDP/shell). RBAC + admin isolation apply."""
+    sess = db.get(RemoteSession, session_id)
+    if sess is None:
+        raise HTTPException(404, "Session not found")
+    get_device(db, ctx, sess.device_id)
+    if sess.mode != "screen" or sess.status != "active":
+        raise HTTPException(409, "No active remote-screen session for this endpoint")
+    from app.services.rdp_relay import mint_token
+    audit.record(db, ctx.user.organization_id, ctx.actor, "remote.screen_connect", target_type="device",
+                 target_id=sess.device_id, target_label=None, metadata={"session_id": str(sess.id)})
+    db.commit()
+    return {"session_id": str(sess.id), "operator_token": mint_token(str(sess.id), "operator"),
+            "tunnel_path": "/api/v1/rdp/tunnel"}
+
+
 @router.post("/remote-sessions/{session_id}/shell-connect")
 def shell_connect(session_id: uuid.UUID, ctx: AuthContext = Depends(SHELL), db: Session = Depends(get_db)):
     """Mint a short-lived operator token so the console's terminal can attach to the live-response shell over the relay

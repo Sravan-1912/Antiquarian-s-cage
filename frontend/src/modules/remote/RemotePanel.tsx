@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Headset, Lock, Monitor, Power, PowerOff, ShieldOff, Terminal, UserCheck, UserX } from 'lucide-react'
+import { Activity, Headset, Lock, Monitor, MonitorSmartphone, Power, PowerOff, ShieldOff, Terminal, UserCheck, UserX } from 'lucide-react'
 import { Alert, Badge, Button, Card, CardHeader, Field, Input, Spinner } from '@/components/ui/primitives'
 import { Dialog } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/useAuth'
@@ -9,6 +9,7 @@ import type { Device, InspectState, RemoteAction, RemoteCommand, RemoteSession }
 import { formatDateTime, relativeTime } from '@/utils/format'
 import { SessionStatusBadge, TerminateButton } from './shared'
 import { ShellTerminal } from './ShellTerminal'
+import { ScreenViewer } from './ScreenViewer'
 
 const LABEL: Record<string, string> = {
   'device.inspect': 'Status inspection', 'device.lock': 'Remote lock', 'device.restart': 'Remote restart',
@@ -48,14 +49,16 @@ export function RemotePanel({ device }: { device: Device }) {
   const [rdpOpen, setRdpOpen] = useState(false)
   const [shellOpen, setShellOpen] = useState(false)
   const [shellElevated, setShellElevated] = useState(false)
+  const [screenOpen, setScreenOpen] = useState(false)
   const [termSession, setTermSession] = useState<string | null>(null)
+  const [screenSession, setScreenSession] = useState<string | null>(null)
   const [assistMinutes, setAssistMinutes] = useState(30)
   const [rdpConnectMsg, setRdpConnectMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
 
   const actions = useQuery({ queryKey: ['device', device.id, 'actions'], queryFn: () => api.get<RemoteAction[]>(`/devices/${device.id}/actions`), refetchInterval: 5_000 })
   const sessions = useQuery({ queryKey: ['device', device.id, 'sessions'], queryFn: () => api.get<RemoteSession[]>(`/remote-sessions?device_id=${device.id}&limit=10`), refetchInterval: 5_000 })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['device', device.id] }) }
-  const reset = () => { setPending(null); setReason(''); setStepPw(''); setAssistOpen(false); setRdpOpen(false); setShellOpen(false); setShellElevated(false) }
+  const reset = () => { setPending(null); setReason(''); setStepPw(''); setAssistOpen(false); setRdpOpen(false); setShellOpen(false); setShellElevated(false); setScreenOpen(false) }
 
   const act = useMutation({
     mutationFn: async (p: Pending) => {
@@ -80,6 +83,11 @@ export function RemotePanel({ device }: { device: Device }) {
   const shell = useMutation({
     // Live-response shell: break-glass arbitrary execution. Banner + full command audit; RBAC-gated server-side.
     mutationFn: async () => api.post<RemoteSession>(`/devices/${device.id}/shell`, { reason, max_minutes: assistMinutes, elevated: shellElevated }),
+    onSuccess: () => { refresh(); reset() },
+  })
+  const screen = useMutation({
+    // Remote screen: agent captures the screen + injects input over the relay. Works on any Windows edition; banner shown.
+    mutationFn: async () => api.post<RemoteSession>(`/devices/${device.id}/screen`, { reason, max_minutes: assistMinutes }),
     onSuccess: () => { refresh(); reset() },
   })
   const rdpConnect = useMutation({
@@ -114,8 +122,8 @@ export function RemotePanel({ device }: { device: Device }) {
       {open && (
         <Alert tone={open.status === 'active' ? 'warning' : 'info'}>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>{open.mode === 'rdp' ? <Monitor className="mr-1.5 inline size-4" /> : open.mode === 'shell' ? <Terminal className="mr-1.5 inline size-4" /> : <Headset className="mr-1.5 inline size-4" />}
-              {open.mode === 'rdp' ? 'Remote desktop' : open.mode === 'shell' ? 'Live-response shell' : 'Remote assistance'} <b>{open.status.replace('_', ' ')}</b> — {open.requested_by_label}
+            <span>{open.mode === 'rdp' ? <Monitor className="mr-1.5 inline size-4" /> : open.mode === 'shell' ? <Terminal className="mr-1.5 inline size-4" /> : open.mode === 'screen' ? <MonitorSmartphone className="mr-1.5 inline size-4" /> : <Headset className="mr-1.5 inline size-4" />}
+              {open.mode === 'rdp' ? 'Remote desktop' : open.mode === 'shell' ? 'Live-response shell' : open.mode === 'screen' ? 'Remote screen' : 'Remote assistance'} <b>{open.status.replace('_', ' ')}</b> — {open.requested_by_label}
               {open.expires_at && ` · ends ${formatDateTime(open.expires_at)}`}{open.status === 'requested' && ' · waiting for the endpoint'}</span>
             <div className="flex items-center gap-2">
               {open.mode === 'rdp' && open.status === 'active' && remote && (
@@ -123,6 +131,9 @@ export function RemotePanel({ device }: { device: Device }) {
               )}
               {open.mode === 'shell' && open.status === 'active' && canShell && (
                 <Button size="sm" variant="primary" onClick={() => setTermSession(open.id)}><Terminal />Open terminal</Button>
+              )}
+              {open.mode === 'screen' && open.status === 'active' && remote && (
+                <Button size="sm" variant="primary" onClick={() => setScreenSession(open.id)}><MonitorSmartphone />Open screen</Button>
               )}
               {remote && <TerminateButton session={open} onDone={refresh} />}
             </div>
@@ -144,6 +155,7 @@ export function RemotePanel({ device }: { device: Device }) {
               <Button size="sm" variant="outline" onClick={() => ask('device.logoff', {}, 'Log off the user', 'Ends the active interactive session, returning to the sign-in screen. Unsaved work in open applications may be lost.', true)}><UserX />Log off user</Button>
               <Button size="sm" onClick={() => { assist.reset(); setAssistOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Headset />Remote assistance</Button>
               <Button size="sm" onClick={() => { rdp.reset(); setRdpOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Monitor />Remote desktop</Button>
+              <Button size="sm" onClick={() => { screen.reset(); setScreenOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : 'Works on any Windows edition (incl. Home)'}><MonitorSmartphone />Remote screen</Button>
               {canShell && <Button size="sm" variant="outline" onClick={() => { shell.reset(); setShellOpen(true) }} disabled={!!open || !device.online} title={!device.online ? 'Endpoint offline' : undefined}><Terminal />Live-response shell</Button>}
               {canIsolate && (isolated
                 ? <Button size="sm" variant="primary" onClick={() => ask('device.release', {}, 'Release from isolation', 'Restores normal network access on the endpoint and removes the containment firewall rules.')}><ShieldOff />Release isolation</Button>
@@ -286,7 +298,18 @@ export function RemotePanel({ device }: { device: Device }) {
         </form>
       </Dialog>
 
+      <Dialog open={screenOpen} onOpenChange={(o) => !o && reset()} title="Start remote screen"
+        description="Shares the endpoint's screen and lets you control it — the agent captures the screen and injects your mouse/keyboard, so it works on ANY Windows edition (including Home) and across any network, with no RDP host. No consent prompt, but a visible 'Remote screen active' banner is shown on the endpoint for the whole session, which the person there can end at any time.">
+        <form onSubmit={(e: FormEvent) => { e.preventDefault(); screen.mutate() }} className="space-y-3">
+          {screen.error && <Alert>{describeError(screen.error)}</Alert>}
+          <Field label="Reason (audited)" htmlFor="scr"><Input id="scr" required minLength={5} maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+          <Field label="Maximum duration (minutes)" htmlFor="scm"><Input id="scm" type="number" min={5} max={120} value={assistMinutes} onChange={(e) => setAssistMinutes(Number(e.target.value))} /></Field>
+          <div className="flex justify-end"><Button type="submit" loading={screen.isPending}><MonitorSmartphone />Start remote screen</Button></div>
+        </form>
+      </Dialog>
+
       {termSession && <ShellTerminal sessionId={termSession} hostname={device.hostname} onClose={() => setTermSession(null)} />}
+      {screenSession && <ScreenViewer sessionId={screenSession} hostname={device.hostname} onClose={() => setScreenSession(null)} />}
     </div>
   )
 }
